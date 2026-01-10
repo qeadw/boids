@@ -10,6 +10,10 @@ A boids flocking simulation built as a single HTML file using React 18 (via CDN)
 
 Open `boids.html` directly in a browser. No build step or server required.
 
+## Security
+
+All secrets and API keys must be stored in `.env` (git-ignored). Never commit credentials, tokens, or keys to the repository.
+
 ## Architecture
 
 The entire application lives in `boids.html` with inline `<script type="text/babel">` containing:
