@@ -15,6 +15,7 @@ export const wasmworld_get_predator_data: (a: number) => [number, number];
 export const wasmworld_get_stats: (a: number) => [number, number];
 export const wasmworld_height: (a: number) => number;
 export const wasmworld_new: (a: number, b: number, c: number) => number;
+export const wasmworld_remove_obstacle: (a: number, b: number, c: number) => void;
 export const wasmworld_reset: (a: number, b: number, c: number, d: number) => void;
 export const wasmworld_tick: (a: number, b: number, c: number, d: number, e: number) => void;
 export const wasmworld_width: (a: number) => number;

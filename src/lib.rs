@@ -89,6 +89,15 @@ impl WasmWorld {
         self.world.add_obstacle(x, y);
     }
 
+    /// Remove obstacle near position (within radius 20)
+    pub fn remove_obstacle(&mut self, x: f32, y: f32) {
+        self.world.obstacles.retain(|&(ox, oy)| {
+            let dx = ox - x;
+            let dy = oy - y;
+            dx * dx + dy * dy > 400.0 // 20^2
+        });
+    }
+
     /// Add a food source at position
     pub fn add_food(&mut self, x: f32, y: f32) {
         self.world.add_food(x, y);

@@ -169,6 +169,14 @@ export class WasmWorld {
         return v1;
     }
     /**
+     * Remove obstacle near position (within radius 20)
+     * @param {number} x
+     * @param {number} y
+     */
+    remove_obstacle(x, y) {
+        wasm.wasmworld_remove_obstacle(this.__wbg_ptr, x, y);
+    }
+    /**
      * Get obstacle positions as flat array [x, y, x, y, ...]
      * @returns {Float32Array}
      */

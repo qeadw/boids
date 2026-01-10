@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Living World - Boids (Wasm)</title>
+  <title>Boids Simulation</title>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -51,35 +51,46 @@ class Pond{
   draw(ctx){const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,Math.max(this.width,this.height)/2);g.addColorStop(0,'rgba(30,80,120,0.8)');g.addColorStop(0.7,'rgba(40,100,140,0.7)');g.addColorStop(1,'rgba(50,120,160,0.5)');ctx.fillStyle=g;ctx.beginPath();ctx.ellipse(this.x,this.y,this.width/2,this.height/2,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,150,50,0.7)';for(let f of this.fish){ctx.beginPath();ctx.ellipse(this.x+f.x,this.y+f.y,4,2,Math.sin(f.phase)*0.3,0,Math.PI*2);ctx.fill()}}
 }
 
-const mutationInfo={
-  giant:{name:'Giant',emoji:'🦣',color:'#f97316',type:'neutral',desc:'50% larger, slower'},
-  tiny:{name:'Tiny',emoji:'🐜',color:'#a3e635',type:'neutral',desc:'40% smaller, faster'},
-  glowing:{name:'Glowing',emoji:'✨',color:'#fbbf24',type:'special',desc:'Emits light'},
-  speedy:{name:'Speedy',emoji:'⚡',color:'#22d3ee',type:'good',desc:'40% faster'},
-  tough:{name:'Tough',emoji:'🛡️',color:'#64748b',type:'good',desc:'Resists fatigue'},
-  longlived:{name:'Long-lived',emoji:'🕰️',color:'#c084fc',type:'good',desc:'50% longer lifespan'},
-  fertile:{name:'Fertile',emoji:'🥚',color:'#fb7185',type:'good',desc:'Reproduces faster'},
-  camouflage:{name:'Camouflage',emoji:'🍃',color:'#4ade80',type:'good',desc:'Harder to catch'},
-  aggressive:{name:'Aggressive',emoji:'😤',color:'#ef4444',type:'neutral',desc:'Attacks others'},
-  magnetic:{name:'Magnetic',emoji:'🧲',color:'#f472b6',type:'neutral',desc:'Very social'},
-  nocturnal:{name:'Nocturnal',emoji:'🦉',color:'#1e3a8a',type:'neutral',desc:'Active at night'},
-  plated:{name:'Plated',emoji:'🪖',color:'#78716c',type:'good',desc:'Survives one attack'},
-  ravenous:{name:'Ravenous',emoji:'😋',color:'#ea580c',type:'neutral',desc:'Eats more, needs more'},
-  zen:{name:'Zen',emoji:'🧘',color:'#a78bfa',type:'good',desc:'Very brave'},
-  rainbow:{name:'Rainbow',emoji:'🌈',color:'#ec4899',type:'special',desc:'Color shifts'},
-  cannibal:{name:'Cannibal',emoji:'💀',color:'#dc2626',type:'bad',desc:'Eats own kind'},
-  immortal:{name:'Immortal',emoji:'♾️',color:'#fcd34d',type:'special',desc:'Never ages'},
-  bigstomach:{name:'Big Stomach',emoji:'🍔',color:'#f59e0b',type:'good',desc:'Gets more from food'},
-  smallstomach:{name:'Small Stomach',emoji:'🥗',color:'#84cc16',type:'bad',desc:'Gets less from food'},
-  traitor:{name:'Traitor',emoji:'🎭',color:'#7c3aed',type:'special',desc:'Becomes predator on death'},
-  egggiver:{name:'Egg Giver',emoji:'🐣',color:'#fde047',type:'special',desc:'Spawns mutants on death'},
-  fat:{name:'Fat',emoji:'🐷',color:'#fdba74',type:'neutral',desc:'Slower, bigger target'},
-  paper:{name:'Paper',emoji:'📄',color:'#e2e8f0',type:'bad',desc:'Very fragile'},
-  flightless:{name:'Flightless',emoji:'🐧',color:'#0ea5e9',type:'bad',desc:'Much slower'},
-  mechanical:{name:'Mechanical',emoji:'🤖',color:'#6b7280',type:'special',desc:'Tireless'},
-  tasty:{name:'Tasty',emoji:'🍖',color:'#f87171',type:'bad',desc:'Predators target first'},
-  bullied:{name:'Bullied',emoji:'😢',color:'#94a3b8',type:'bad',desc:'Others avoid, easily scared'}
-};
+// Mutation definitions with bit positions matching Rust
+const mutationDefs=[
+  {bit:0,key:'giant',name:'Giant',emoji:'🦣',color:'#f97316',bg:'#7c2d12'},
+  {bit:1,key:'tiny',name:'Tiny',emoji:'🐜',color:'#a3e635',bg:'#365314'},
+  {bit:2,key:'speedy',name:'Speedy',emoji:'⚡',color:'#22d3ee',bg:'#164e63'},
+  {bit:3,key:'glowing',name:'Glowing',emoji:'✨',color:'#fbbf24',bg:'#78350f'},
+  {bit:4,key:'tough',name:'Tough',emoji:'🛡️',color:'#64748b',bg:'#334155'},
+  {bit:5,key:'longlived',name:'Long-lived',emoji:'🕰️',color:'#c084fc',bg:'#581c87'},
+  {bit:6,key:'fertile',name:'Fertile',emoji:'🥚',color:'#fb7185',bg:'#881337'},
+  {bit:7,key:'camouflage',name:'Camouflage',emoji:'🍃',color:'#4ade80',bg:'#14532d'},
+  {bit:8,key:'nocturnal',name:'Nocturnal',emoji:'🦉',color:'#60a5fa',bg:'#1e3a5f'},
+  {bit:9,key:'magnetic',name:'Magnetic',emoji:'🧲',color:'#f472b6',bg:'#831843'},
+  {bit:10,key:'rainbow',name:'Rainbow',emoji:'🌈',color:'#ec4899',bg:'#831843'},
+  {bit:11,key:'ravenous',name:'Ravenous',emoji:'😋',color:'#ea580c',bg:'#7c2d12'},
+  {bit:12,key:'plated',name:'Plated',emoji:'🪖',color:'#a8a29e',bg:'#44403c'},
+  {bit:13,key:'zen',name:'Zen',emoji:'🧘',color:'#a78bfa',bg:'#4c1d95'},
+  {bit:14,key:'cannibal',name:'Cannibal',emoji:'💀',color:'#dc2626',bg:'#7f1d1d'},
+  {bit:15,key:'immortal',name:'Immortal',emoji:'♾️',color:'#fcd34d',bg:'#78350f'},
+  {bit:16,key:'bigstomach',name:'Big Stomach',emoji:'🍔',color:'#f59e0b',bg:'#78350f'},
+  {bit:17,key:'smallstomach',name:'Small Stomach',emoji:'🥗',color:'#84cc16',bg:'#365314'},
+  {bit:18,key:'traitor',name:'Traitor',emoji:'🎭',color:'#7c3aed',bg:'#4c1d95'},
+  {bit:19,key:'egggiver',name:'Egg Giver',emoji:'🐣',color:'#fde047',bg:'#713f12'},
+  {bit:20,key:'fat',name:'Fat',emoji:'🐷',color:'#fdba74',bg:'#7c2d12'},
+  {bit:21,key:'paper',name:'Paper',emoji:'📄',color:'#e2e8f0',bg:'#475569'},
+  {bit:22,key:'flightless',name:'Flightless',emoji:'🐧',color:'#0ea5e9',bg:'#0c4a6e'},
+  {bit:23,key:'mechanical',name:'Mechanical',emoji:'🤖',color:'#9ca3af',bg:'#374151'},
+  {bit:24,key:'tasty',name:'Tasty',emoji:'🍖',color:'#f87171',bg:'#7f1d1d'},
+  {bit:25,key:'aggressive',name:'Aggressive',emoji:'😤',color:'#ef4444',bg:'#7f1d1d'},
+  {bit:26,key:'bullied',name:'Bullied',emoji:'😢',color:'#94a3b8',bg:'#334155'}
+];
+
+// Decode mutation bits to list of mutation keys
+function decodeMutations(bits){
+  const result=[];
+  const b=Math.floor(bits);
+  for(const m of mutationDefs){
+    if(b&(1<<m.bit))result.push(m);
+  }
+  return result;
+}
 
 function App({wasmWorld}){
   const canvasRef=useRef(null);
@@ -91,6 +102,9 @@ function App({wasmWorld}){
   const[stats,setStats]=useState({boids:0,day:true,predators:0,bugs:0,fps:60});
   const[paused,setPaused]=useState(false);
   const[canvasSize,setCanvasSize]=useState({w:900,h:450});
+  const[rosterData,setRosterData]=useState([]);
+  const[rosterOpen,setRosterOpen]=useState(true);
+  const[legendOpen,setLegendOpen]=useState(true);
 
   const pausedRef=useRef(false);const showTrailsRef=useRef(false);const cursorModeRef=useRef('none');
   const lastFrameTime=useRef(performance.now());const fpsRef=useRef(60);
@@ -128,23 +142,16 @@ function App({wasmWorld}){
         const spd=Math.max(1,Math.floor(settingsRef.current.gameSpeed));
         for(let tick=0;tick<spd;tick++){
           eff.time+=16;
-
-          // Cursor mode: 0=none, 1=attract, 2=repel
           const cMode=cursorModeRef.current==='attract'?1:cursorModeRef.current==='repel'?2:0;
           const cx=cursorPosRef.current.active?cursorPosRef.current.x:-1;
           const cy=cursorPosRef.current.active?cursorPosRef.current.y:-1;
-
-          // Tick the Wasm simulation
           world.tick(cx,cy,cMode,settingsRef.current.cursorStrength);
-
-          // Update visual effects
           if(eff.pond)eff.pond.update();
           eff.ripples=eff.ripples.filter(r=>r.update());
           eff.dangerZones=eff.dangerZones.filter(z=>z.update());
         }
       }
 
-      // Get stats from Wasm
       const statsData=world.get_stats();
       const boidCount=statsData[0];
       const predatorCount=statsData[1];
@@ -152,29 +159,48 @@ function App({wasmWorld}){
       const dayPhase=statsData[3];
       const isDay=dayPhase>0.45;
 
-      // Update stats display (throttled)
-      if(eff.time%500<20){
+      // Update stats and roster (throttled)
+      if(eff.time%500<20||pausedRef.current){
         setStats({boids:Math.round(boidCount),day:isDay,predators:Math.round(predatorCount),bugs:Math.round(bugCount),fps:Math.round(fpsRef.current)});
+
+        // Build roster from boid data
+        const boidData=world.get_boid_data();
+        const roster=[];
+        for(let i=0;i<boidData.length;i+=11){
+          const mutations=boidData[i+8];
+          if(mutations>0){
+            const energy=boidData[i+5];
+            const maxEnergy=boidData[i+6];
+            const hue=boidData[i+4];
+            const species=hue>100&&hue<160?'H':hue<100?'G':'C';
+            roster.push({
+              idx:i/11,
+              species,
+              energy,
+              maxEnergy,
+              lifePercent:Math.round((energy/maxEnergy)*100),
+              mutations:decodeMutations(mutations)
+            });
+          }
+        }
+        roster.sort((a,b)=>b.mutations.length-a.mutations.length);
+        setRosterData(roster.slice(0,20));
       }
 
       // Render
       ctx.fillStyle=`rgba(${12+dayPhase*12},${12+dayPhase*18},${22+dayPhase*25},0.25)`;ctx.fillRect(0,0,w,h);
-
-      // Draw visual effects
       for(const z of eff.dangerZones)z.draw(ctx);
       if(eff.pond)eff.pond.draw(ctx);
       for(const s of eff.shelters)s.draw(ctx,dayPhase);
       for(const n of eff.nests)n.draw(ctx);
       for(const t of eff.trees)t.draw(ctx,dayPhase);
 
-      // Draw obstacles from Wasm
       const obstacleData=world.get_obstacle_data();
       for(let i=0;i<obstacleData.length;i+=2){
         const ox=obstacleData[i],oy=obstacleData[i+1];
         ctx.fillStyle='rgba(80,70,60,0.9)';ctx.beginPath();ctx.arc(ox,oy,14,0,Math.PI*2);ctx.fill();
       }
 
-      // Draw food from Wasm
       const foodData=world.get_food_data();
       const time=eff.time;
       for(let i=0;i<foodData.length;i+=3){
@@ -189,7 +215,6 @@ function App({wasmWorld}){
         }
       }
 
-      // Draw bugs from Wasm (4 floats per bug: x, y, hue, size)
       const bugData=world.get_bug_data();
       for(let i=0;i<bugData.length;i+=4){
         const bx=bugData[i],by=bugData[i+1],hue=bugData[i+2],size=bugData[i+3];
@@ -197,7 +222,6 @@ function App({wasmWorld}){
         ctx.beginPath();ctx.arc(bx,by,size,0,Math.PI*2);ctx.fill();
       }
 
-      // Draw predators from Wasm (7 floats per predator: x, y, vx, vy, energy, is_leader, generation)
       const predData=world.get_predator_data();
       for(let i=0;i<predData.length;i+=7){
         const px=predData[i],py=predData[i+1],pvx=predData[i+2],pvy=predData[i+3];
@@ -205,13 +229,11 @@ function App({wasmWorld}){
         const angle=Math.atan2(pvy,pvx);
         const size=12+gen*2;
         const ng=1-dayPhase;
-
         ctx.save();ctx.translate(px,py);ctx.rotate(angle);
         const grad=ctx.createRadialGradient(0,0,0,0,0,25+ng*15);
         grad.addColorStop(0,`rgba(255,50,50,${0.3+ng*0.3})`);
         grad.addColorStop(1,'rgba(255,50,50,0)');
         ctx.fillStyle=grad;ctx.beginPath();ctx.arc(0,0,25+ng*15,0,Math.PI*2);ctx.fill();
-
         if(isLeader){
           ctx.fillStyle='rgba(255,215,0,0.9)';ctx.beginPath();
           ctx.moveTo(-6,-size*0.8);ctx.lineTo(-3,-size*0.5);ctx.lineTo(0,-size*0.8);
@@ -222,53 +244,40 @@ function App({wasmWorld}){
         ctx.restore();
       }
 
-      // Draw boids from Wasm (11 floats per boid: x, y, vx, vy, hue, energy, max_energy, size_mult, mutations, fear, state)
       const boidData=world.get_boid_data();
       for(let i=0;i<boidData.length;i+=11){
         const bx=boidData[i],by=boidData[i+1],bvx=boidData[i+2],bvy=boidData[i+3];
         const hue=boidData[i+4],energy=boidData[i+5],maxEnergy=boidData[i+6];
         const sizeMult=boidData[i+7],mutations=boidData[i+8],fear=boidData[i+9],state=boidData[i+10];
-
         const angle=Math.atan2(bvy,bvx);
         const baseSize=6*sizeMult;
         const isCollapsed=state===2;
 
-        // Draw trail if enabled
         if(showTrailsRef.current&&!isCollapsed){
           ctx.strokeStyle=`hsla(${hue},70%,60%,0.3)`;ctx.lineWidth=1;
           ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx-bvx*4,by-bvy*4);ctx.stroke();
         }
-
-        // Fear glow
         if(fear>0.3){
           ctx.beginPath();ctx.arc(bx,by,baseSize*2,0,Math.PI*2);
           const glow=ctx.createRadialGradient(bx,by,0,bx,by,baseSize*2);
           glow.addColorStop(0,`rgba(255,100,100,${fear*0.4})`);glow.addColorStop(1,'rgba(255,100,100,0)');
           ctx.fillStyle=glow;ctx.fill();
         }
-
-        // Mutation glow
         if(mutations>0){
           ctx.beginPath();ctx.arc(bx,by,baseSize*1.5,0,Math.PI*2);
           const mutGlow=ctx.createRadialGradient(bx,by,0,bx,by,baseSize*1.5);
           mutGlow.addColorStop(0,`rgba(200,100,255,${0.2+mutations*0.05})`);mutGlow.addColorStop(1,'rgba(200,100,255,0)');
           ctx.fillStyle=mutGlow;ctx.fill();
         }
-
         ctx.save();ctx.translate(bx,by);ctx.rotate(angle);
-
-        // Collapsed state
         if(isCollapsed){
           ctx.fillStyle=`hsla(${hue},40%,40%,0.7)`;
           ctx.beginPath();ctx.ellipse(0,0,baseSize,baseSize*0.5,0,0,Math.PI*2);ctx.fill();
         }else{
-          // Normal boid
           const lightness=45+dayPhase*15;
           ctx.fillStyle=`hsla(${hue},70%,${lightness}%,0.9)`;
           ctx.beginPath();ctx.moveTo(baseSize,0);ctx.lineTo(-baseSize*0.6,-baseSize*0.5);
           ctx.lineTo(-baseSize*0.3,0);ctx.lineTo(-baseSize*0.6,baseSize*0.5);ctx.closePath();ctx.fill();
-
-          // Energy indicator
           const energyRatio=energy/maxEnergy;
           if(energyRatio<0.3){
             ctx.fillStyle=`rgba(255,${energyRatio*255},0,0.6)`;
@@ -278,23 +287,17 @@ function App({wasmWorld}){
         ctx.restore();
       }
 
-      // Draw ripples
       for(const r of eff.ripples)r.draw(ctx);
-
-      // Draw cursor indicator
       if(cursorPosRef.current.active&&cursorModeRef.current!=='none'){
         ctx.strokeStyle=cursorModeRef.current==='attract'?'rgba(100,255,150,0.4)':'rgba(255,100,100,0.4)';
         ctx.lineWidth=2;ctx.beginPath();
         ctx.arc(cursorPosRef.current.x,cursorPosRef.current.y,100*settingsRef.current.cursorStrength,0,Math.PI*2);
         ctx.stroke();
       }
-
-      // Paused overlay
       if(pausedRef.current){
         ctx.fillStyle='rgba(0,0,0,0.3)';ctx.fillRect(0,0,w,h);
         ctx.fillStyle='white';ctx.font='48px sans-serif';ctx.textAlign='center';ctx.fillText('PAUSED',w/2,h/2);
       }
-
       animRef.current=requestAnimationFrame(animate);
     };
 
@@ -308,12 +311,12 @@ function App({wasmWorld}){
     const x=(e.clientX-rect.left)*(canvasRef.current.width/rect.width);
     const y=(e.clientY-rect.top)*(canvasRef.current.height/rect.height);
     const world=worldRef.current;
-
     switch(tool){
       case'obstacle':world.add_obstacle(x,y);break;
       case'predator':world.add_predator(x,y);addRipple(x,y,'rgb(255,50,50)',35);break;
       case'food':world.add_food(x,y);addRipple(x,y,'rgb(100,255,150)',25);break;
       case'boid':world.add_boids(x,y,8);addRipple(x,y,'rgb(150,200,255)',40);break;
+      case'remove':world.remove_obstacle(x,y);break;
     }
   };
 
@@ -337,20 +340,19 @@ function App({wasmWorld}){
     initEffects(canvasSize.w,canvasSize.h);
   };
 
-  const tools=[{id:'food',label:'+'},{id:'obstacle',label:'O'},{id:'predator',label:'P'},{id:'boid',label:'B'}];
+  const tools=[{id:'food',label:'+',title:'Add Food'},{id:'obstacle',label:'O',title:'Add Obstacle'},{id:'remove',label:'X',title:'Remove Obstacle'},{id:'predator',label:'P',title:'Add Predator'},{id:'boid',label:'B',title:'Add Boids'}];
 
   return(
     <div className="flex flex-col items-center gap-1 p-2 bg-gray-900 min-h-screen">
       <div className="flex items-center gap-3 flex-wrap justify-center">
-        <h1 className="text-base font-bold text-cyan-400">Living World <span className="text-xs text-purple-400">(Wasm)</span></h1>
-        <span className="text-gray-500 text-xs">{stats.day?'D':'N'} | {stats.boids} boids | {stats.predators} pred | {stats.bugs} bugs | {stats.fps}fps</span>
+        <span className="text-gray-400 text-sm">{stats.day?'Day':'Night'} | {stats.boids} boids | {stats.predators} pred | {stats.bugs} bugs | {stats.fps}fps</span>
       </div>
 
       <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h} onClick={handleClick} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} className="border border-gray-700 rounded cursor-crosshair"/>
 
       <div className="flex flex-wrap justify-center items-center gap-1">
         <button onClick={()=>setPaused(p=>!p)} className={`px-2 py-0.5 rounded text-xs font-bold ${paused?'bg-green-600':'bg-yellow-600'}`}>{paused?'Play':'Pause'}</button>
-        {tools.map(t=><button key={t.id} onClick={()=>setTool(t.id)} className={`w-7 h-7 rounded text-sm ${tool===t.id?'bg-cyan-600':'bg-gray-700 hover:bg-gray-600'}`} title={t.id}>{t.label}</button>)}
+        {tools.map(t=><button key={t.id} onClick={()=>setTool(t.id)} className={`w-7 h-7 rounded text-sm ${tool===t.id?'bg-cyan-600':'bg-gray-700 hover:bg-gray-600'}`} title={t.title}>{t.label}</button>)}
         <span className="mx-1 text-gray-600">|</span>
         {['none','attract','repel'].map(m=><button key={m} onClick={()=>setCursorMode(m)} className={`px-2 py-0.5 rounded text-xs ${cursorMode===m?m==='attract'?'bg-green-600':m==='repel'?'bg-red-600':'bg-gray-600':'bg-gray-700'}`}>{m==='none'?'Off':m==='attract'?'Attract':'Repel'}</button>)}
         <span className="mx-1 text-gray-600">|</span>
@@ -358,7 +360,7 @@ function App({wasmWorld}){
         <button onClick={resetWorld} className="px-2 py-0.5 bg-gray-700 rounded text-xs">Reset</button>
       </div>
 
-      <div className="w-full max-w-3xl mt-1 p-2 bg-gray-800 rounded border border-gray-700">
+      <div className="w-full max-w-4xl mt-1 p-2 bg-gray-800 rounded border border-gray-700">
         <div className="flex flex-wrap gap-4 justify-center items-center text-xs">
           <label className="flex items-center gap-1"><span className="text-gray-400">Speed</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.gameSpeed=Math.max(0.5,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
           <label className="flex items-center gap-1"><span className="text-gray-400">Start Boids</span><input type="number" defaultValue={60} onBlur={e=>{settingsRef.current.startBoids=Math.max(10,Math.min(500,parseInt(e.target.value)||60))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
@@ -369,6 +371,62 @@ function App({wasmWorld}){
             <button onClick={()=>resizeCanvas(1400,650)} className={`px-1 py-0.5 rounded ${canvasSize.w===1400?'bg-cyan-600':'bg-gray-700'}`}>XL</button>
           </div>
         </div>
+      </div>
+
+      {/* Collapsible Roster */}
+      <div className="w-full max-w-4xl mt-1">
+        <button onClick={()=>setRosterOpen(o=>!o)} className="w-full flex items-center justify-between p-2 bg-gray-800 rounded-t border border-gray-700 text-sm">
+          <span className="text-pink-400 font-bold">Mutant Roster ({rosterData.length})</span>
+          <span className="text-gray-500">{rosterOpen?'▼':'▶'}</span>
+        </button>
+        {rosterOpen&&(
+          <div className="bg-gray-800/50 rounded-b border-x border-b border-gray-700 max-h-48 overflow-y-auto">
+            {rosterData.length===0?<div className="p-3 text-gray-600 text-sm text-center">No mutants yet</div>:
+            <div className="p-2 space-y-1">
+              {rosterData.map((boid,idx)=>{
+                const speciesColor=boid.species==='H'?'text-green-400':boid.species==='C'?'text-cyan-400':'text-yellow-400';
+                const lifeColor=boid.lifePercent>60?'text-green-400':boid.lifePercent>30?'text-yellow-400':'text-red-400';
+                return(
+                  <div key={idx} className="p-2 rounded bg-gray-900/70 border-l-2 border-purple-500">
+                    <div className="flex items-center gap-2 text-xs mb-1">
+                      <span className={`font-bold ${speciesColor}`}>{boid.species}</span>
+                      <span className={lifeColor}>{boid.lifePercent}% life</span>
+                      <span className="text-gray-500">{boid.mutations.length} mutations</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {boid.mutations.map(m=>(
+                        <span key={m.key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:m.bg,color:m.color}}>
+                          <span style={{fontSize:'1rem'}}>{m.emoji}</span>
+                          <span>{m.name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>}
+          </div>
+        )}
+      </div>
+
+      {/* Collapsible Mutation Legend */}
+      <div className="w-full max-w-4xl mt-1">
+        <button onClick={()=>setLegendOpen(o=>!o)} className="w-full flex items-center justify-between p-2 bg-gray-800 rounded-t border border-gray-700 text-sm">
+          <span className="text-purple-400 font-bold">Mutation Legend</span>
+          <span className="text-gray-500">{legendOpen?'▼':'▶'}</span>
+        </button>
+        {legendOpen&&(
+          <div className="bg-gray-800/50 rounded-b border-x border-b border-gray-700 p-3">
+            <div className="flex flex-wrap gap-2 justify-center">
+              {mutationDefs.map(m=>(
+                <div key={m.key} className="flex items-center gap-1 px-2 py-1 rounded" style={{backgroundColor:m.bg}} title={m.name}>
+                  <span style={{fontSize:'1.7rem'}}>{m.emoji}</span>
+                  <span className="text-xs" style={{color:m.color}}>{m.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

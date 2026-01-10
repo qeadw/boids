@@ -29,6 +29,10 @@ export class WasmWorld {
    */
   get_food_data(): Float32Array;
   /**
+   * Remove obstacle near position (within radius 20)
+   */
+  remove_obstacle(x: number, y: number): void;
+  /**
    * Get obstacle positions as flat array [x, y, x, y, ...]
    */
   get_obstacle_data(): Float32Array;
@@ -98,6 +102,7 @@ export interface InitOutput {
   readonly wasmworld_get_stats: (a: number) => [number, number];
   readonly wasmworld_height: (a: number) => number;
   readonly wasmworld_new: (a: number, b: number, c: number) => number;
+  readonly wasmworld_remove_obstacle: (a: number, b: number, c: number) => void;
   readonly wasmworld_reset: (a: number, b: number, c: number, d: number) => void;
   readonly wasmworld_tick: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly wasmworld_width: (a: number) => number;
