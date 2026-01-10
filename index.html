@@ -124,7 +124,17 @@ class Corpse{
 }
 
 class Predator{
-  constructor(x,y,packId=0,gen=0,mutations={}){this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2);this.acceleration=new Vector2();this.baseSpeed=3.5+gen*0.3;this.maxSpeed=this.baseSpeed;this.maxForce=0.1+gen*0.02;this.energy=100;this.packId=packId;this.isLeader=false;this.generation=gen;this.kills=0;this.mutations=mutations;this.targetBoid=null}
+  constructor(x,y,packId=0,gen=0,mutations={}){this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2);this.acceleration=new Vector2();this.baseSpeed=3.5+gen*0.3;this.maxSpeed=this.baseSpeed;this.maxForce=0.1+gen*0.02;this.energy=100;this.packId=packId;this.isLeader=false;this.generation=gen;this.kills=0;this.mutations=mutations;this.targetBoid=null;this.id=Math.random().toString(36).substr(2,9);this.applyMutationEffects()}
+  applyMutationEffects(){
+    // Speed mutations
+    if(this.mutations.speedy)this.baseSpeed*=1.3;if(this.mutations.swift)this.baseSpeed*=1.15;if(this.mutations.fat)this.baseSpeed*=0.8;
+    // Max force (turning)
+    if(this.mutations.swift)this.maxForce*=1.2;if(this.mutations.wise)this.maxForce*=1.1;
+    // Size
+    this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier=1.4;if(this.mutations.tiny)this.sizeMultiplier=0.7;
+  }
+  getMutationList(){return Object.keys(this.mutations)}
+  getMutationCount(){return Object.keys(this.mutations).length}
   edges(w,h){if(this.position.x>w)this.position.x=0;if(this.position.x<0)this.position.x=w;if(this.position.y>h)this.position.y=0;if(this.position.y<0)this.position.y=h}
   hunt(boids,predators,shelters,dayPhase,spatialHash){
     const agg=1+(1-dayPhase)*0.5;this.maxSpeed=this.baseSpeed+(1-dayPhase)*2;
@@ -151,24 +161,41 @@ class Predator{
       sx=sx*this.maxSpeed-this.velocity.x;sy=sy*this.maxSpeed-this.velocity.y;
       sm=Math.sqrt(sx*sx+sy*sy);const sl=this.maxForce*agg;if(sm>sl){sx=sx/sm*sl;sy=sy/sm*sl}
       this.acceleration.x+=sx;this.acceleration.y+=sy;
-      const catchD=target.mutations.camouflage?8:target.mutations.fat?15:12;
+      let catchD=target.mutations.camouflage||target.mutations.silent?8:target.mutations.fat?15:target.mutations.chonky?14:12;
+      if(target.mutations.acrobat)catchD*=0.7;if(target.mutations.swift)catchD*=0.85;
       const tdx=px-target.position.x,tdy=py-target.position.y;
       const actualDist=Math.sqrt(tdx*tdx+tdy*tdy);
       if(actualDist<catchD){
+        // Near-death experience - chance to evolve fighter mutation
+        if(!target.mutations.fighter&&!target.nearDeathTriggered){target.nearDeathCount=(target.nearDeathCount||0)+1;target.nearDeathTriggered=true;if(Math.random()<0.03){target.mutations.fighter=true;target.canFight=true;target.justEvolvedFighter=true}}
+        // Electric shock
+        if(target.mutations.electric&&Math.random()<0.4){this.energy-=20;target.fear=0.8;return null}
+        // Fighter mutation - 50% chance to fight off predator
+        if(target.mutations.fighter&&Math.random()<0.5){this.energy-=15;target.fear=0.5;target.justFoughtOff=true;return null}
+        // Lucky mutation gives better odds
+        if(target.mutations.lucky&&Math.random()<0.3){target.fear=1;return null}
+        // Acrobat dodge
+        if(target.mutations.acrobat&&Math.random()<0.25){target.fear=0.8;return null}
+        // Plated armor
         if(target.mutations.plated&&target.hasArmor){target.hasArmor=false;target.mutations.plated=false;target.fear=1;target.armorJustBroke=true;this.energy=Math.min(150,this.energy+10);return null}
-        if(target.mutations.paper||Math.random()>0.1||target.mutations.tasty){
+        // Catch success
+        let catchChance=target.mutations.paper?1:target.mutations.tasty?0.95:0.9;
+        if(target.mutations.cursed)catchChance+=0.1;if(target.mutations.fragile)catchChance+=0.05;
+        if(Math.random()<catchChance){
           this.energy=Math.min(150,this.energy+(target.mutations.tasty?60:45));this.kills++;
-          if(Math.random()<0.05&&Object.keys(target.mutations).length>0){const muts=Object.keys(target.mutations);const inheritMut=muts[Math.floor(Math.random()*muts.length)];if(!['traitor','egggiver'].includes(inheritMut))this.mutations[inheritMut]=true}
+          if(Math.random()<0.05&&Object.keys(target.mutations).length>0){const muts=Object.keys(target.mutations);const inheritMut=muts[Math.floor(Math.random()*muts.length)];if(!['traitor','egggiver','phoenix','mimic'].includes(inheritMut))this.mutations[inheritMut]=true}
           return target
-        }
+        }else{target.fear=1;target.nearDeathTriggered=true}
       }
     }
     return null
   }
-  update(w,h,obstacles){
-    this.energy-=0.04;
+  update(w,h,obstacles,cursorPos,cursorMode,cursorStrength,vortexPredators){
+    this.energy-=0.04;if(this.mutations.healer)this.energy=Math.min(150,this.energy+0.01);
     const px=this.position.x,py=this.position.y;
     for(let i=0;i<obstacles.length;i++){const o=obstacles[i];const dx=px-o.x,dy=py-o.y,dsq=dx*dx+dy*dy;if(dsq<900){const m=Math.sqrt(dsq);if(m>0){this.acceleration.x+=dx/m*MAX_FORCE*3;this.acceleration.y+=dy/m*MAX_FORCE*3}}}
+    // Cursor vortex for predators
+    if(vortexPredators&&cursorPos&&cursorMode!=='none'){const cdx=cursorPos.x-px,cdy=cursorPos.y-py,cdsq=cdx*cdx+cdy*cdy;if(cdsq<10000){const cd=Math.sqrt(cdsq);let ccx=cursorMode==='attract'?cdx:-cdx,ccy=cursorMode==='attract'?cdy:-cdy,ccm=Math.sqrt(ccx*ccx+ccy*ccy);if(ccm>0){ccx/=ccm;ccy/=ccm}const force=MAX_FORCE*2*cursorStrength*(1-cd/100);this.acceleration.x+=ccx*force;this.acceleration.y+=ccy*force}}
     this.velocity.addM(this.acceleration).limitM(this.maxSpeed);this.position.addM(this.velocity);this.acceleration.zero();this.edges(w,h);return this.energy>0
   }
   draw(ctx,time,dayPhase){const angle=Math.atan2(this.velocity.y,this.velocity.x);const size=12+this.generation*2;ctx.save();ctx.translate(this.position.x,this.position.y);ctx.rotate(angle);const ng=1-dayPhase;const g=ctx.createRadialGradient(0,0,0,0,0,25+ng*15);g.addColorStop(0,`rgba(255,50,50,${0.3+ng*0.3})`);g.addColorStop(1,'rgba(255,50,50,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,25+ng*15,0,Math.PI*2);ctx.fill();if(this.isLeader){ctx.fillStyle='rgba(255,215,0,0.9)';ctx.beginPath();ctx.moveTo(-6,-size*0.8);ctx.lineTo(-3,-size*0.5);ctx.lineTo(0,-size*0.8);ctx.lineTo(3,-size*0.5);ctx.lineTo(6,-size*0.8);ctx.lineTo(4,-size*0.4);ctx.lineTo(-4,-size*0.4);ctx.fill()}ctx.fillStyle=`hsl(0,80%,${35+this.energy*0.15}%)`;ctx.beginPath();ctx.moveTo(size,0);ctx.lineTo(-size*0.5,-size*0.6);ctx.lineTo(-size*0.3,0);ctx.lineTo(-size*0.5,size*0.6);ctx.closePath();ctx.fill();if(Object.keys(this.mutations).length>0){ctx.strokeStyle='rgba(255,200,0,0.5)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,size+4,0,Math.PI*2);ctx.stroke()}ctx.restore()}
@@ -187,21 +214,24 @@ class Boid{
     this.mutations={};
     if(parentMutations){const{parent1Muts,parent2Muts}=parentMutations;const all=new Set([...Object.keys(parent1Muts||{}),...Object.keys(parent2Muts||{})]);for(const m of all){if(m==='egggiver')continue;const p1=parent1Muts&&parent1Muts[m],p2=parent2Muts&&parent2Muts[m];if(p1&&p2)this.mutations[m]=true;else if((p1||p2)&&Math.random()<0.5)this.mutations[m]=true}}
     if(forceMutation)this.mutations[forceMutation]=true;
-    else if(Math.random()<0.03*mutMult){const possible=['giant','tiny','glowing','speedy','tough','longlived','fertile','camouflage','aggressive','magnetic','nocturnal','plated','ravenous','zen','rainbow','cannibal','immortal','bigstomach','smallstomach','traitor','egggiver','fat','paper','flightless','mechanical','tasty','bullied'];const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true}
+    else if(Math.random()<0.03*mutMult){const possible=Object.keys(mutationInfo).filter(m=>m!=='egggiver'&&m!=='phoenix'&&m!=='mimic');const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true}
+    this.hasPhoenix=!!this.mutations.phoenix;this.nearDeathCount=0
     this.applyMutationEffects()
   }
   applyMutationEffects(){
-    this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier=1.5;if(this.mutations.tiny)this.sizeMultiplier=0.6;if(this.mutations.fat)this.sizeMultiplier=1.3;
-    this.speedMultiplier=1;if(this.mutations.speedy)this.speedMultiplier=1.4;if(this.mutations.tiny)this.speedMultiplier*=1.2;if(this.mutations.giant)this.speedMultiplier*=0.85;if(this.mutations.fat)this.speedMultiplier*=0.7;if(this.mutations.flightless)this.speedMultiplier*=0.5;if(this.mutations.mechanical)this.speedMultiplier*=1.1;
-    if(this.mutations.longlived)this.maxAge*=1.5;if(this.mutations.immortal)this.maxAge=Infinity;
-    this.fatigueResistance=this.mutations.tough?0.5:this.mutations.mechanical?0.3:1;if(this.mutations.paper)this.fatigueResistance=2;
-    if(this.mutations.zen)this.bravery=Math.min(1,this.bravery+0.4);
-    this.isNocturnal=!!this.mutations.nocturnal;this.hasArmor=!!this.mutations.plated;this.ravenous=!!this.mutations.ravenous;this.hasCamouflage=!!this.mutations.camouflage;
-    if(this.mutations.magnetic)this.sociability=Math.min(1,this.sociability+0.5);if(this.mutations.bullied)this.sociability=Math.max(0,this.sociability-0.4);
-    this.fertilityBonus=this.mutations.fertile?2:1;this.isAggressive=!!this.mutations.aggressive;this.isRainbow=!!this.mutations.rainbow;this.isGlowing=!!this.mutations.glowing||!!this.mutations.mechanical;
+    this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier=1.5;if(this.mutations.tiny)this.sizeMultiplier=0.6;if(this.mutations.fat)this.sizeMultiplier=1.3;if(this.mutations.chonky)this.sizeMultiplier*=1.2;
+    this.speedMultiplier=1;if(this.mutations.speedy)this.speedMultiplier=1.4;if(this.mutations.tiny)this.speedMultiplier*=1.2;if(this.mutations.giant)this.speedMultiplier*=0.85;if(this.mutations.fat)this.speedMultiplier*=0.7;if(this.mutations.flightless)this.speedMultiplier*=0.5;if(this.mutations.mechanical)this.speedMultiplier*=1.1;if(this.mutations.swift)this.speedMultiplier*=1.15;if(this.mutations.wings)this.speedMultiplier*=1.3;if(this.mutations.chonky)this.speedMultiplier*=0.8;
+    if(this.mutations.longlived)this.maxAge*=1.5;if(this.mutations.immortal)this.maxAge=Infinity;if(this.mutations.fragile)this.maxAge*=0.6;
+    this.fatigueResistance=this.mutations.tough?0.5:this.mutations.mechanical?0.3:this.mutations.wings?0.4:this.mutations.hermit?0.4:1;if(this.mutations.paper)this.fatigueResistance=2;if(this.mutations.sleepy)this.fatigueResistance*=1.5;if(this.mutations.stubborn)this.fatigueResistance=0;
+    if(this.mutations.zen)this.bravery=Math.min(1,this.bravery+0.4);if(this.mutations.wise)this.bravery=Math.min(1,this.bravery+0.3);
+    this.isNocturnal=!!this.mutations.nocturnal;this.hasArmor=!!this.mutations.plated;this.ravenous=!!this.mutations.ravenous;this.hasCamouflage=!!this.mutations.camouflage||!!this.mutations.silent;
+    if(this.mutations.magnetic)this.sociability=Math.min(1,this.sociability+0.5);if(this.mutations.bullied)this.sociability=Math.max(0,this.sociability-0.4);if(this.mutations.hermit)this.sociability=Math.max(0,this.sociability-0.6);if(this.mutations.leader)this.sociability=Math.min(1,this.sociability+0.3);
+    this.fertilityBonus=this.mutations.fertile?2:1;this.isAggressive=!!this.mutations.aggressive;this.isRainbow=!!this.mutations.rainbow;this.isGlowing=!!this.mutations.glowing||!!this.mutations.mechanical||!!this.mutations.electric;
     this.maxEnergy=this.mutations.bigstomach?200:this.mutations.smallstomach?50:100;
-    this.energyDrain=this.mutations.immortal?3:this.mutations.smallstomach?0.66:this.mutations.mechanical?0.5:1;
+    this.energyDrain=this.mutations.immortal?3:this.mutations.smallstomach?0.66:this.mutations.mechanical?0.5:this.mutations.fluffy?0.7:1;if(this.mutations.vampire)this.energyDrain*=1.3;
     if(this.mutations.bullied)this.fear=Math.min(1,this.fear+0.3);
+    // Fighter, scout, lucky, acrobat affect catch chance in predator.hunt()
+    this.canFight=!!this.mutations.fighter;this.isScout=!!this.mutations.scout;this.isLucky=!!this.mutations.lucky;this.isAcrobat=!!this.mutations.acrobat;this.isElectric=!!this.mutations.electric;this.isLoud=!!this.mutations.loud;this.isCursed=!!this.mutations.cursed;
   }
   getMutationCount(){return Object.keys(this.mutations).length}
   getMutationList(){return Object.keys(this.mutations)}
@@ -266,8 +296,8 @@ class Boid{
     // Pond seeking
     if(pond&&this.energy<this.maxEnergy*0.15&&this.fear<0.3){const dx=pond.position.x-px,dy=pond.position.y-py,d=dx*dx+dy*dy;if(d<6400){if(d<625&&pond.fish.length>0){this.isFishing=true;this.fishTimer=60;this.velocity.zero()}else{let pdx=dx,pdy=dy,pm=Math.sqrt(pdx*pdx+pdy*pdy);if(pm>0){pdx/=pm;pdy/=pm}pdx=pdx*MAX_SPEED*0.3-vx;pdy=pdy*MAX_SPEED*0.3-vy;pm=Math.sqrt(pdx*pdx+pdy*pdy);const pl=MAX_FORCE*0.5;if(pm>pl){pdx=pdx/pm*pl;pdy=pdy/pm*pl}ax+=pdx*3;ay+=pdy*3}}}
 
-    // Cursor
-    if(cursorPos&&cursorMode!=='none'){const cdx=cursorPos.x-px,cdy=cursorPos.y-py,cdsq=cdx*cdx+cdy*cdy;if(cdsq<10000){const cd=Math.sqrt(cdsq);let ccx=cursorMode==='attract'?cdx:-cdx,ccy=cursorMode==='attract'?cdy:-cdy,ccm=Math.sqrt(ccx*ccx+ccy*ccy);if(ccm>0){ccx/=ccm;ccy/=ccm}ccx=ccx*MAX_SPEED-vx;ccy=ccy*MAX_SPEED-vy;ccm=Math.sqrt(ccx*ccx+ccy*ccy);const cl=MAX_FORCE*2*cursorStrength;if(ccm>cl){ccx=ccx/ccm*cl;ccy=ccy/ccm*cl}const cf=1-cd/100;ax+=ccx*cf;ay+=ccy*cf}}
+    // Cursor - only if vortexBoids is enabled
+    if(cursorPos&&cursorMode!=='none'&&settingsRef.current.vortexBoids){const cdx=cursorPos.x-px,cdy=cursorPos.y-py,cdsq=cdx*cdx+cdy*cdy;if(cdsq<10000){const cd=Math.sqrt(cdsq);let ccx=cursorMode==='attract'?cdx:-cdx,ccy=cursorMode==='attract'?cdy:-cdy,ccm=Math.sqrt(ccx*ccx+ccy*ccy);if(ccm>0){ccx/=ccm;ccy/=ccm}ccx=ccx*MAX_SPEED-vx;ccy=ccy*MAX_SPEED-vy;ccm=Math.sqrt(ccx*ccx+ccy*ccy);const cl=MAX_FORCE*2*cursorStrength;if(ccm>cl){ccx=ccx/ccm*cl;ccy=ccy/ccm*cl}const cf=1-cd/100;ax+=ccx*cf;ay+=ccy*cf}}
 
     this.acceleration.x+=ax;this.acceleration.y+=ay;
   }
@@ -323,12 +353,70 @@ class Boid{
   }
 }
 
-const mutationInfo={giant:{emoji:'🦣',name:'Giant',desc:'1.5x size, slower',color:'#a855f7',type:'good'},tiny:{emoji:'🐜',name:'Tiny',desc:'0.6x size, faster',color:'#22d3ee',type:'good'},speedy:{emoji:'⚡',name:'Speedy',desc:'1.4x speed',color:'#facc15',type:'good'},glowing:{emoji:'✨',name:'Glowing',desc:'Bioluminescent',color:'#4ade80',type:'good'},tough:{emoji:'💪',name:'Tough',desc:'50% fatigue resist',color:'#f97316',type:'good'},longlived:{emoji:'🕐',name:'Long-lived',desc:'1.5x lifespan',color:'#a78bfa',type:'good'},fertile:{emoji:'🥚',name:'Fertile',desc:'2x reproduction',color:'#fb7185',type:'good'},camouflage:{emoji:'👻',name:'Camouflage',desc:'Harder to catch',color:'#94a3b8',type:'good'},plated:{emoji:'🛡️',name:'Plated',desc:'Survives 1 attack',color:'#60a5fa',type:'good'},aggressive:{emoji:'😠',name:'Aggressive',desc:'Hunts cannibals',color:'#ef4444',type:'neutral'},nocturnal:{emoji:'🦉',name:'Nocturnal',desc:'Night boost',color:'#6366f1',type:'good'},rainbow:{emoji:'🌈',name:'Rainbow',desc:'Color shifts',color:'#ec4899',type:'good'},ravenous:{emoji:'🍖',name:'Ravenous',desc:'Eats fast, needs more',color:'#84cc16',type:'neutral'},zen:{emoji:'🧘',name:'Zen',desc:'+40% bravery',color:'#2dd4bf',type:'good'},magnetic:{emoji:'🧲',name:'Magnetic',desc:'+50% sociability',color:'#f472b6',type:'good'},cannibal:{emoji:'🦷',name:'Cannibal',desc:'Eats birds when <20% food',color:'#dc2626',type:'bad'},immortal:{emoji:'♾️',name:'Immortal',desc:'No age death, 3x hunger',color:'#fbbf24',type:'neutral'},bigstomach:{emoji:'🎈',name:'Big Stomach',desc:'2x food capacity',color:'#34d399',type:'good'},smallstomach:{emoji:'🫘',name:'Small Stomach',desc:'0.5x capacity, 0.66x drain',color:'#fb923c',type:'neutral'},traitor:{emoji:'💀',name:'Traitor',desc:'Becomes predator on death',color:'#7c3aed',type:'bad'},egggiver:{emoji:'🥚',name:'Egg-Giver',desc:'Dies, spawns 3 mutant babies',color:'#f0abfc',type:'special'},fat:{emoji:'🐷',name:'Fat',desc:'1.3x size, 0.7x speed',color:'#fca5a5',type:'bad'},paper:{emoji:'📄',name:'Paper',desc:'2x fatigue, very fragile',color:'#e5e7eb',type:'bad'},flightless:{emoji:'🐧',name:'Flightless',desc:'0.5x speed, no perching',color:'#6b7280',type:'bad'},mechanical:{emoji:'🤖',name:'Mechanical',desc:'1.1x speed, low fatigue/hunger',color:'#38bdf8',type:'good'},tasty:{emoji:'🍗',name:'Tasty',desc:'Predators prioritize you',color:'#f87171',type:'bad'},bullied:{emoji:'😢',name:'Bullied',desc:'-40% social, always scared',color:'#a1a1aa',type:'bad'}};
+const mutationInfo={
+  // Good mutations
+  giant:{emoji:'🦣',name:'Giant',desc:'1.5x size, slower',color:'#a855f7',type:'good'},
+  tiny:{emoji:'🐜',name:'Tiny',desc:'0.6x size, faster',color:'#22d3ee',type:'good'},
+  speedy:{emoji:'⚡',name:'Speedy',desc:'1.4x speed',color:'#facc15',type:'good'},
+  glowing:{emoji:'✨',name:'Glowing',desc:'Bioluminescent',color:'#4ade80',type:'good'},
+  tough:{emoji:'💪',name:'Tough',desc:'50% fatigue resist',color:'#f97316',type:'good'},
+  longlived:{emoji:'🕐',name:'Long-lived',desc:'1.5x lifespan',color:'#a78bfa',type:'good'},
+  fertile:{emoji:'🥚',name:'Fertile',desc:'2x reproduction',color:'#fb7185',type:'good'},
+  camouflage:{emoji:'👻',name:'Camouflage',desc:'Harder to catch',color:'#94a3b8',type:'good'},
+  plated:{emoji:'🛡️',name:'Plated',desc:'Survives 1 attack',color:'#60a5fa',type:'good'},
+  nocturnal:{emoji:'🦉',name:'Nocturnal',desc:'Night boost',color:'#6366f1',type:'good'},
+  rainbow:{emoji:'🌈',name:'Rainbow',desc:'Color shifts',color:'#ec4899',type:'good'},
+  zen:{emoji:'🧘',name:'Zen',desc:'+40% bravery',color:'#2dd4bf',type:'good'},
+  magnetic:{emoji:'🧲',name:'Magnetic',desc:'+50% sociability',color:'#f472b6',type:'good'},
+  bigstomach:{emoji:'🎈',name:'Big Stomach',desc:'2x food capacity',color:'#34d399',type:'good'},
+  mechanical:{emoji:'🤖',name:'Mechanical',desc:'1.1x speed, low fatigue',color:'#38bdf8',type:'good'},
+  // NEW good mutations
+  fighter:{emoji:'⚔️',name:'Fighter',desc:'50% to fight off predator',color:'#ef4444',type:'good'},
+  swift:{emoji:'🦅',name:'Swift',desc:'Faster turns, agile',color:'#06b6d4',type:'good'},
+  healer:{emoji:'💚',name:'Healer',desc:'Slowly regenerates energy',color:'#22c55e',type:'good'},
+  lucky:{emoji:'🍀',name:'Lucky',desc:'Better survival odds',color:'#84cc16',type:'good'},
+  scout:{emoji:'👁️',name:'Scout',desc:'Sees predators from far',color:'#8b5cf6',type:'good'},
+  leader:{emoji:'👑',name:'Leader',desc:'Nearby boids get +speed',color:'#fbbf24',type:'good'},
+  chonky:{emoji:'🦛',name:'Chonky',desc:'Harder to catch, slower',color:'#d97706',type:'good'},
+  photosynthetic:{emoji:'🌱',name:'Photosynthetic',desc:'Gains energy in daylight',color:'#16a34a',type:'good'},
+  electric:{emoji:'⚡',name:'Electric',desc:'Shocks nearby predators',color:'#eab308',type:'good'},
+  silent:{emoji:'🤫',name:'Silent',desc:'Harder for predators to detect',color:'#64748b',type:'good'},
+  wings:{emoji:'🪽',name:'Wings',desc:'1.3x speed, low fatigue',color:'#a5b4fc',type:'good'},
+  stubborn:{emoji:'🦴',name:'Stubborn',desc:'Never collapses from fatigue',color:'#78716c',type:'good'},
+  wise:{emoji:'🧠',name:'Wise',desc:'Better at avoiding danger',color:'#c084fc',type:'good'},
+  fluffy:{emoji:'🐑',name:'Fluffy',desc:'Slower energy drain',color:'#fef3c7',type:'good'},
+  acrobat:{emoji:'🤸',name:'Acrobat',desc:'Dodges attacks easier',color:'#f0abfc',type:'good'},
+  // Neutral mutations
+  aggressive:{emoji:'😠',name:'Aggressive',desc:'Hunts cannibals',color:'#ef4444',type:'neutral'},
+  ravenous:{emoji:'🍖',name:'Ravenous',desc:'Eats fast, needs more',color:'#84cc16',type:'neutral'},
+  immortal:{emoji:'♾️',name:'Immortal',desc:'No age death, 3x hunger',color:'#fbbf24',type:'neutral'},
+  smallstomach:{emoji:'🫘',name:'Small Stomach',desc:'0.5x capacity, 0.66x drain',color:'#fb923c',type:'neutral'},
+  berserker:{emoji:'🔥',name:'Berserker',desc:'Fast when low health',color:'#dc2626',type:'neutral'},
+  hermit:{emoji:'🏔️',name:'Hermit',desc:'Avoids others, low fatigue',color:'#737373',type:'neutral'},
+  vampire:{emoji:'🧛',name:'Vampire',desc:'Drains energy from others',color:'#7c2d12',type:'neutral'},
+  // Bad mutations
+  cannibal:{emoji:'🦷',name:'Cannibal',desc:'Eats birds when <20% food',color:'#dc2626',type:'bad'},
+  traitor:{emoji:'💀',name:'Traitor',desc:'Becomes predator on death',color:'#7c3aed',type:'bad'},
+  fat:{emoji:'🐷',name:'Fat',desc:'1.3x size, 0.7x speed',color:'#fca5a5',type:'bad'},
+  paper:{emoji:'📄',name:'Paper',desc:'2x fatigue, very fragile',color:'#e5e7eb',type:'bad'},
+  flightless:{emoji:'🐧',name:'Flightless',desc:'0.5x speed, no perching',color:'#6b7280',type:'bad'},
+  tasty:{emoji:'🍗',name:'Tasty',desc:'Predators prioritize you',color:'#f87171',type:'bad'},
+  bullied:{emoji:'😢',name:'Bullied',desc:'-40% social, always scared',color:'#a1a1aa',type:'bad'},
+  clumsy:{emoji:'🤕',name:'Clumsy',desc:'Bumps into things more',color:'#fda4af',type:'bad'},
+  loud:{emoji:'📢',name:'Loud',desc:'Predators hear you easier',color:'#f97316',type:'bad'},
+  sleepy:{emoji:'😴',name:'Sleepy',desc:'Gets tired faster',color:'#a3a3a3',type:'bad'},
+  fragile:{emoji:'🥀',name:'Fragile',desc:'Dies easier, shorter life',color:'#be185d',type:'bad'},
+  cursed:{emoji:'👁️‍🗨️',name:'Cursed',desc:'Bad luck, attracts danger',color:'#4c1d95',type:'bad'},
+  // Special mutations
+  egggiver:{emoji:'🥚',name:'Egg-Giver',desc:'Dies, spawns 3 mutant babies',color:'#f0abfc',type:'special'},
+  phoenix:{emoji:'🔥',name:'Phoenix',desc:'Reborn once on death',color:'#f97316',type:'special'},
+  mimic:{emoji:'🎭',name:'Mimic',desc:'Copies nearby mutations',color:'#8b5cf6',type:'special'}
+};
 
 function App(){
   const canvasRef=useRef(null);
   const stateRef=useRef({boids:[],obstacles:[],predators:[],food:[],trees:[],shelters:[],nests:[],dangerZones:[],ripples:[],bugs:[],corpses:[],pond:null,time:0,dayTime:0,seasonTime:0,cursorPos:null,nextPackId:0,width:900,height:450,spatialHash:new SpatialHash(50)});
-  const settingsRef=useRef({popCap:150,gameSpeed:1,mutationMult:1,birthMult:1,bugMult:1,predBreeding:true,cursorStrength:1,startBoids:60});
+  const settingsRef=useRef({popCap:150,gameSpeed:1,mutationMult:1,birthMult:1,bugMult:1,predBreeding:true,cursorStrength:1,startBoids:60,vortexBoids:true,vortexPredators:false});
   const animRef=useRef(null);
   const[tool,setTool]=useState('food');const[showTrails,setShowTrails]=useState(false);const[cursorMode,setCursorMode]=useState('none');
   const[stats,setStats]=useState({boids:0,day:true,season:'Spring',mutants:0,multiMutants:0,maxMutations:0,predators:0,bugs:0,fps:60});
@@ -336,6 +424,9 @@ function App(){
   const[selectedBoid,setSelectedBoid]=useState(null);const[showMutationPanel,setShowMutationPanel]=useState(false);
   const[favoriteBoid,setFavoriteBoid]=useState(null);const[paused,setPaused]=useState(false);
   const[canvasSize,setCanvasSize]=useState({w:900,h:450});
+  const[selectedPredator,setSelectedPredator]=useState(null);const[showPredMutPanel,setShowPredMutPanel]=useState(false);
+  const[predatorRoster,setPredatorRoster]=useState([]);const[showDNALab,setShowDNALab]=useState(false);
+  const[vortexBoids,setVortexBoids]=useState(true);const[vortexPredators,setVortexPredators]=useState(false);
   
   const pausedRef=useRef(false);const showTrailsRef=useRef(false);const cursorModeRef=useRef('none');const favoriteRef=useRef(null);
   const mutationLogRef=useRef([]);const lastFrameTime=useRef(performance.now());const fpsRef=useRef(60);
@@ -368,6 +459,14 @@ function App(){
     const state=stateRef.current;const boid=state.boids.find(b=>b.id===boidId);if(!boid)return;
     boid.mutations[mutationType]=true;boid.applyMutationEffects();addMutationLog(mutationType,'given',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(255,200,0)',30);
   },[addMutationLog,addRipple]);
+
+  const givePredatorMutation=useCallback((predId,mutationType)=>{
+    const state=stateRef.current;const pred=state.predators.find(p=>p.id===predId);if(!pred)return;
+    pred.mutations[mutationType]=true;pred.applyMutationEffects();addMutationLog(mutationType,'given_pred','Predator',false);addRipple(pred.position.x,pred.position.y,'rgb(255,100,50)',30);
+  },[addMutationLog,addRipple]);
+
+  useEffect(()=>{settingsRef.current.vortexBoids=vortexBoids},[vortexBoids]);
+  useEffect(()=>{settingsRef.current.vortexPredators=vortexPredators},[vortexPredators]);
   
   useEffect(()=>{
     const canvas=canvasRef.current;const ctx=canvas.getContext('2d');
@@ -401,11 +500,22 @@ function App(){
           
           const caughtBoids=new Set();const newPredatorsFromTraitors=[];
           for(const pred of state.predators){const caught=pred.hunt(state.boids,state.predators,state.shelters,dayPhase,state.spatialHash);if(caught){caughtBoids.add(caught);addRipple(caught.position.x,caught.position.y,'rgb(255,100,100)',45);addDangerZone(caught.position.x,caught.position.y);state.corpses.push(new Corpse(caught.position.x,caught.position.y,caught.species));if(caught.mutations.traitor){newPredatorsFromTraitors.push(new Predator(caught.position.x,caught.position.y,state.nextPackId++,0,{...caught.mutations}));addRipple(caught.position.x,caught.position.y,'rgb(128,0,255)',50)}}}
-          for(const boid of state.boids)if(boid.armorJustBroke){boid.armorJustBroke=false;addMutationLog('plated','armor_broke',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(100,150,255)',35)}
+          for(const boid of state.boids){
+            if(boid.armorJustBroke){boid.armorJustBroke=false;addMutationLog('plated','armor_broke',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(100,150,255)',35)}
+            if(boid.justFoughtOff){boid.justFoughtOff=false;addRipple(boid.position.x,boid.position.y,'rgb(255,100,50)',30)}
+            if(boid.justEvolvedFighter){boid.justEvolvedFighter=false;addMutationLog('fighter','evolved',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(255,200,0)',45)}
+            boid.nearDeathTriggered=false;
+            // Healer regeneration
+            if(boid.mutations.healer)boid.energy=Math.min(boid.maxEnergy,boid.energy+0.02);
+            // Photosynthetic - gains energy in daylight
+            if(boid.mutations.photosynthetic&&dayPhase>0.5)boid.energy=Math.min(boid.maxEnergy,boid.energy+0.03);
+            // Berserker - faster when low health
+            if(boid.mutations.berserker&&boid.energy<boid.maxEnergy*0.3)boid.speedMultiplier=(boid.speedMultiplier||1)*1.4;
+          }
           state.boids=state.boids.filter(b=>!caughtBoids.has(b));state.predators.push(...newPredatorsFromTraitors);
           
           const newPredators=[];
-          state.predators=state.predators.filter(p=>{const alive=p.update(w,h,state.obstacles);if(!alive)addRipple(p.position.x,p.position.y,'rgb(100,100,100)',35);if(settings.predBreeding&&alive&&p.energy>130&&p.kills>=3&&Math.random()<0.01){p.energy-=50;newPredators.push(new Predator(p.position.x+(Math.random()-0.5)*30,p.position.y+(Math.random()-0.5)*30,p.packId,p.generation+1,{...p.mutations}));addRipple(p.position.x,p.position.y,'rgb(255,150,50)',40)}return alive});
+          state.predators=state.predators.filter(p=>{const alive=p.update(w,h,state.obstacles,state.cursorPos,cursorModeRef.current,settings.cursorStrength,settings.vortexPredators);if(!alive)addRipple(p.position.x,p.position.y,'rgb(100,100,100)',35);if(settings.predBreeding&&alive&&p.energy>130&&p.kills>=3&&Math.random()<0.01){p.energy-=50;const child=new Predator(p.position.x+(Math.random()-0.5)*30,p.position.y+(Math.random()-0.5)*30,p.packId,p.generation+1,{...p.mutations});newPredators.push(child);addRipple(p.position.x,p.position.y,'rgb(255,150,50)',40)}return alive});
           state.predators.push(...newPredators);
           
           const perches=state.trees.map(t=>t.perch);
@@ -464,10 +574,12 @@ function App(){
           // Stats update (throttled)
           if(state.time%500<20){
             let mutants=0,multiMutants=0,maxMutations=0;const rosterArr=[];
-            for(const b of state.boids){const count=b.getMutationCount();if(count>0){mutants++;rosterArr.push({id:b.id,species:b.species,isHybrid:b.isHybrid,energy:b.energy,maxEnergy:b.maxEnergy,age:b.age,maxAge:b.maxAge,hasArmor:b.hasArmor,mutations:b.getMutationList(),isFishing:b.isFishing})}if(count>1)multiMutants++;if(count>maxMutations)maxMutations=count}
+            for(const b of state.boids){const count=b.getMutationCount();if(count>0){mutants++;rosterArr.push({id:b.id,species:b.species,isHybrid:b.isHybrid,energy:b.energy,maxEnergy:b.maxEnergy,age:b.age,maxAge:b.maxAge,hasArmor:b.hasArmor,mutations:b.getMutationList(),isFishing:b.isFishing,type:'boid'})}if(count>1)multiMutants++;if(count>maxMutations)maxMutations=count}
             rosterArr.sort((a,b)=>b.mutations.length-a.mutations.length);
+            // Predator roster
+            const predRoster=state.predators.map(p=>({id:p.id,energy:p.energy,generation:p.generation,kills:p.kills,isLeader:p.isLeader,mutations:p.getMutationList(),type:'predator'}));
             setStats({boids:state.boids.length,day:isDay,season:seasonNames[seasonIndex],mutants,multiMutants,maxMutations,predators:state.predators.length,bugs:state.bugs.length,fps:Math.round(fpsRef.current)});
-            setRosterData(rosterArr);
+            setRosterData(rosterArr);setPredatorRoster(predRoster);
           }
         }
       }
@@ -515,7 +627,7 @@ function App(){
       <div className="flex items-center gap-3 flex-wrap justify-center">
         <h1 className="text-base font-bold text-cyan-400">Living World</h1>
         <span className="text-gray-500 text-xs">{stats.day?'☀️':'🌙'} {stats.season} • {stats.boids} boids • {stats.predators} pred • {stats.bugs} bugs • {stats.fps}fps</span>
-        {stats.mutants>0&&<span className="text-purple-400 text-xs">🧬 {stats.mutants}{stats.multiMutants>0&&<span className="text-pink-400"> ({stats.multiMutants})</span>}</span>}
+        {stats.mutants>0&&<span className="text-purple-400 text-xs cursor-pointer hover:text-purple-300" onClick={()=>setShowDNALab(true)} title="Open DNA Lab">🧬 {stats.mutants}{stats.multiMutants>0&&<span className="text-pink-400"> ({stats.multiMutants})</span>}</span>}
       </div>
       
       <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h} onClick={handleClick} onMouseMove={e=>{const rect=canvasRef.current.getBoundingClientRect();stateRef.current.cursorPos=new Vector2((e.clientX-rect.left)*(canvasRef.current.width/rect.width),(e.clientY-rect.top)*(canvasRef.current.height/rect.height))}} onMouseLeave={()=>stateRef.current.cursorPos=null} className="border border-gray-700 rounded cursor-crosshair"/>
@@ -525,6 +637,7 @@ function App(){
         {tools.map(t=><button key={t.id} onClick={()=>setTool(t.id)} className={`w-7 h-7 rounded text-sm ${tool===t.id?'bg-cyan-600':'bg-gray-700 hover:bg-gray-600'}`} title={t.id}>{t.label}</button>)}
         <span className="mx-1 text-gray-600">|</span>
         {['none','attract','repel'].map(m=><button key={m} onClick={()=>setCursorMode(m)} className={`px-2 py-0.5 rounded text-xs ${cursorMode===m?m==='attract'?'bg-green-600':m==='repel'?'bg-red-600':'bg-gray-600':'bg-gray-700'}`}>{m==='none'?'—':m==='attract'?'🧲':'💨'}</button>)}
+        {cursorMode!=='none'&&<><label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={vortexBoids} onChange={e=>setVortexBoids(e.target.checked)} className="w-3 h-3"/><span className="text-cyan-400">🐦</span></label><label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={vortexPredators} onChange={e=>setVortexPredators(e.target.checked)} className="w-3 h-3"/><span className="text-red-400">👁</span></label></>}
         <span className="mx-1 text-gray-600">|</span>
         <button onClick={()=>setShowTrails(t=>!t)} className={`px-2 py-0.5 rounded text-xs ${showTrails?'bg-purple-600':'bg-gray-700'}`}>✨</button>
         <button onClick={()=>{mutationLogRef.current=[];setMutationLog([]);setFavoriteBoid(null);initWorld(canvasSize.w,canvasSize.h)}} className="px-2 py-0.5 bg-gray-700 rounded text-xs">🔄</button>
@@ -547,7 +660,7 @@ function App(){
       {showMutationPanel&&selectedBoid&&(
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={()=>setShowMutationPanel(false)}>
           <div className="bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-2xl max-h-96 overflow-y-auto" onClick={e=>e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-3"><h3 className="text-cyan-400 font-bold">Give Mutation</h3><button onClick={()=>setShowMutationPanel(false)} className="text-gray-400 hover:text-white">✕</button></div>
+            <div className="flex justify-between items-center mb-3"><h3 className="text-cyan-400 font-bold">Give Mutation to Bird</h3><button onClick={()=>setShowMutationPanel(false)} className="text-gray-400 hover:text-white">✕</button></div>
             <div className="grid grid-cols-4 gap-2">
               {Object.entries(mutationInfo).map(([key,info])=>(
                 <button key={key} onClick={()=>{giveMutation(selectedBoid,key);setShowMutationPanel(false)}} className={`p-2 rounded text-xs text-left hover:bg-gray-700 ${info.type==='good'?'bg-green-900/30':info.type==='bad'?'bg-red-900/30':info.type==='special'?'bg-purple-900/30':'bg-gray-700/50'}`}>
@@ -559,35 +672,144 @@ function App(){
           </div>
         </div>
       )}
+
+      {showPredMutPanel&&selectedPredator&&(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={()=>setShowPredMutPanel(false)}>
+          <div className="bg-gray-800 p-4 rounded-lg border border-red-600 max-w-2xl max-h-96 overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-3"><h3 className="text-red-400 font-bold">Give Mutation to Predator</h3><button onClick={()=>setShowPredMutPanel(false)} className="text-gray-400 hover:text-white">✕</button></div>
+            <div className="grid grid-cols-4 gap-2">
+              {Object.entries(mutationInfo).filter(([k])=>!['cannibal','traitor','egggiver','phoenix','tasty','bullied','fertile'].includes(k)).map(([key,info])=>(
+                <button key={key} onClick={()=>{givePredatorMutation(selectedPredator,key);setShowPredMutPanel(false)}} className={`p-2 rounded text-xs text-left hover:bg-gray-700 ${info.type==='good'?'bg-green-900/30':info.type==='bad'?'bg-red-900/30':info.type==='special'?'bg-purple-900/30':'bg-gray-700/50'}`}>
+                  <div className="flex items-center gap-1"><span>{info.emoji}</span><span style={{color:info.color}}>{info.name}</span></div>
+                  <div className="text-gray-500 text-xs mt-1">{info.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDNALab&&(
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={()=>setShowDNALab(false)}>
+          <div className="bg-gray-900 p-6 rounded-lg border border-purple-500 max-w-4xl max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4"><h3 className="text-purple-400 font-bold text-lg">🧬 DNA Lab - Mutation Statistics</h3><button onClick={()=>setShowDNALab(false)} className="text-gray-400 hover:text-white text-xl">✕</button></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <h4 className="text-green-400 font-bold mb-2">Good Mutations ({Object.entries(mutationInfo).filter(([,i])=>i.type==='good').length})</h4>
+                <div className="space-y-1">{Object.entries(mutationInfo).filter(([,i])=>i.type==='good').map(([key,info])=>{
+                  const count=stateRef.current.boids.filter(b=>b.mutations[key]).length;
+                  return<div key={key} className="flex items-center justify-between p-1.5 rounded bg-green-900/20 border border-green-800/30">
+                    <div className="flex items-center gap-2"><span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span></div>
+                    <div className="flex items-center gap-2"><span className="text-gray-400 text-xs">{info.desc}</span><span className="text-green-400 font-bold">{count}</span></div>
+                  </div>})}</div>
+              </div>
+              <div>
+                <h4 className="text-red-400 font-bold mb-2">Bad Mutations ({Object.entries(mutationInfo).filter(([,i])=>i.type==='bad').length})</h4>
+                <div className="space-y-1 mb-4">{Object.entries(mutationInfo).filter(([,i])=>i.type==='bad').map(([key,info])=>{
+                  const count=stateRef.current.boids.filter(b=>b.mutations[key]).length;
+                  return<div key={key} className="flex items-center justify-between p-1.5 rounded bg-red-900/20 border border-red-800/30">
+                    <div className="flex items-center gap-2"><span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span></div>
+                    <div className="flex items-center gap-2"><span className="text-gray-400 text-xs">{info.desc}</span><span className="text-red-400 font-bold">{count}</span></div>
+                  </div>})}</div>
+                <h4 className="text-yellow-400 font-bold mb-2">Neutral ({Object.entries(mutationInfo).filter(([,i])=>i.type==='neutral').length})</h4>
+                <div className="space-y-1">{Object.entries(mutationInfo).filter(([,i])=>i.type==='neutral').map(([key,info])=>{
+                  const count=stateRef.current.boids.filter(b=>b.mutations[key]).length;
+                  return<div key={key} className="flex items-center justify-between p-1.5 rounded bg-yellow-900/20 border border-yellow-800/30">
+                    <div className="flex items-center gap-2"><span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span></div>
+                    <div className="flex items-center gap-2"><span className="text-gray-400 text-xs">{info.desc}</span><span className="text-yellow-400 font-bold">{count}</span></div>
+                  </div>})}</div>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h4 className="text-purple-400 font-bold mb-2">Special Mutations</h4>
+              <div className="flex gap-2">{Object.entries(mutationInfo).filter(([,i])=>i.type==='special').map(([key,info])=>{
+                const count=stateRef.current.boids.filter(b=>b.mutations[key]).length;
+                return<div key={key} className="flex items-center gap-2 p-2 rounded bg-purple-900/20 border border-purple-800/30">
+                  <span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span><span className="text-purple-400 font-bold">({count})</span>
+                </div>})}</div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h4 className="text-cyan-400 font-bold mb-2">Quick Actions</h4>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={()=>{stateRef.current.boids.forEach(b=>{if(Object.keys(b.mutations).length===0){const muts=Object.keys(mutationInfo).filter(m=>m!=='egggiver'&&m!=='phoenix'&&m!=='mimic');b.mutations[muts[Math.floor(Math.random()*muts.length)]]=true;b.applyMutationEffects()}})}} className="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 rounded text-sm">Give All Boids Random Mutation</button>
+                <button onClick={()=>{stateRef.current.boids.forEach(b=>{const goodMuts=Object.entries(mutationInfo).filter(([,i])=>i.type==='good').map(([k])=>k);const mut=goodMuts[Math.floor(Math.random()*goodMuts.length)];b.mutations[mut]=true;b.applyMutationEffects()})}} className="px-3 py-1.5 bg-green-700 hover:bg-green-600 rounded text-sm">Give All Good Mutation</button>
+                <button onClick={()=>{stateRef.current.boids.forEach(b=>{b.mutations.fighter=true;b.applyMutationEffects()})}} className="px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded text-sm">⚔️ Give All Fighter</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       <div className="w-full max-w-5xl mt-1 flex gap-2">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1"><span className="text-pink-400 text-sm font-bold">🧬 Roster</span><span className="text-gray-600 text-xs">({rosterData.length})</span></div>
-          <div className="bg-gray-800 rounded border border-gray-700 h-40 overflow-y-auto scroll-stable">
-            {rosterData.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">No mutants</div>:
-            <div className="p-2 space-y-1">{rosterData.map(boid=>{
+          <div className="flex items-center gap-2 mb-1"><span className="text-pink-400 text-sm font-bold">🧬 Mutant Roster</span><span className="text-gray-600 text-xs">({rosterData.length} mutants)</span></div>
+          <div className="bg-gray-800 rounded border border-gray-700 h-48 overflow-y-auto scroll-stable">
+            {rosterData.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">No mutants yet</div>:
+            <div className="p-2 space-y-2">{rosterData.map(boid=>{
+              const speciesName=boid.isHybrid?'Hybrid':boid.species===0?'Cyan':'Gold';
               const speciesColor=boid.isHybrid?'text-green-400':boid.species===0?'text-cyan-400':'text-yellow-400';
               const isFav=boid.id===favoriteBoid;
               const lifePercent=Math.round((boid.energy/boid.maxEnergy)*100);
               const lifeColor=lifePercent>60?'text-green-400':lifePercent>30?'text-yellow-400':'text-red-400';
               const agePercent=Math.round((boid.age/boid.maxAge)*100);
-              return<div key={boid.id} className={`p-1.5 rounded bg-gray-900/50 border-l-2 ${isFav?'border-yellow-400':'border-purple-500'} cursor-pointer hover:bg-gray-800`} onClick={()=>{setSelectedBoid(boid.id);setShowMutationPanel(true)}}>
-                <div className="flex items-center gap-1.5 flex-wrap text-xs"><span className={`font-bold ${speciesColor}`}>{boid.isHybrid?'H':boid.species===0?'C':'G'}</span><span className={lifeColor}>{lifePercent}%</span><span className="text-gray-500">age {agePercent}%</span>{isFav&&<span>⭐</span>}</div>
-                <div className="flex flex-wrap gap-1 mt-1">{boid.mutations.map(mut=>{const info=mutationInfo[mut];return info?<span key={mut} className="inline-flex items-center gap-0.5 px-1 rounded text-xs" style={{backgroundColor:info.color+'22',color:info.color}}><span style={{fontSize:'0.85rem'}}>{info.emoji}</span><span>{info.name}</span></span>:null})}</div>
+              const ageColor=agePercent>80?'text-red-400':agePercent>50?'text-yellow-400':'text-green-400';
+              return<div key={boid.id} className={`p-2 rounded bg-gray-900/50 border-l-3 ${isFav?'border-yellow-400':'border-purple-500'} cursor-pointer hover:bg-gray-700/50`} onClick={()=>{setSelectedBoid(boid.id);setShowMutationPanel(true)}}>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold ${speciesColor}`}>{speciesName}</span>
+                    {isFav&&<span className="text-yellow-400">⭐ Favorite</span>}
+                    {boid.isFishing&&<span className="text-blue-400">🎣 Fishing</span>}
+                  </div>
+                  <span className="text-gray-500 text-xs">{boid.mutations.length} mutation{boid.mutations.length!==1?'s':''}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs mb-2">
+                  <span className={lifeColor}>❤️ Energy: {lifePercent}%</span>
+                  <span className={ageColor}>⏳ Age: {agePercent}%</span>
+                  {boid.hasArmor&&<span className="text-blue-400">🛡️ Armored</span>}
+                </div>
+                <div className="flex flex-wrap gap-1.5">{boid.mutations.map(mut=>{const info=mutationInfo[mut];return info?<span key={mut} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'22',color:info.color,border:`1px solid ${info.color}44`}}><span>{info.emoji}</span><span className="font-medium">{info.name}</span></span>:null})}</div>
               </div>})}</div>}
           </div>
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1"><span className="text-purple-400 text-sm font-bold">📜 Log</span><span className="text-gray-600 text-xs">({mutationLog.length})</span></div>
-          <div className="bg-gray-800 rounded border border-gray-700 h-40 overflow-y-auto scroll-stable">
-            {mutationLog.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">Waiting</div>:
-            <div className="p-2 space-y-1">{mutationLog.map(entry=><div key={entry.id} className="flex items-center gap-1 p-0.5 text-xs">
-              <span>{entry.info.emoji}</span><span style={{color:entry.info.color}}>{entry.info.name}</span>
-              <span className={`px-1 rounded ${entry.event==='new'?'bg-yellow-500/20 text-yellow-400':entry.event==='given'?'bg-orange-500/20 text-orange-400':'bg-purple-500/20 text-purple-400'}`}>{entry.event==='new'?'NEW':entry.event==='given'?'⚡':entry.event==='egg'?'🥚':'INH'}</span>
-            </div>)}</div>}
+          <div className="flex items-center gap-2 mb-1"><span className="text-purple-400 text-sm font-bold">📜 Mutation Log</span><span className="text-gray-600 text-xs">({mutationLog.length} events)</span></div>
+          <div className="bg-gray-800 rounded border border-gray-700 h-48 overflow-y-auto scroll-stable">
+            {mutationLog.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">Waiting for mutations...</div>:
+            <div className="p-2 space-y-1.5">{mutationLog.map(entry=>{
+              const eventLabel=entry.event==='new'?'New Mutation':entry.event==='given'?'Given':entry.event==='given_pred'?'Given Pred':entry.event==='egg'?'Egg Birth':entry.event==='inherited'?'Inherited':entry.event==='both'?'Both Parents':entry.event==='armor_broke'?'Armor Broke':entry.event==='evolved'?'Evolved':'Event';
+              const eventColor=entry.event==='new'?'bg-yellow-500/20 text-yellow-400 border-yellow-500/30':entry.event==='given'||entry.event==='given_pred'?'bg-orange-500/20 text-orange-400 border-orange-500/30':entry.event==='egg'?'bg-pink-500/20 text-pink-400 border-pink-500/30':entry.event==='armor_broke'?'bg-blue-500/20 text-blue-400 border-blue-500/30':entry.event==='evolved'?'bg-red-500/20 text-red-400 border-red-500/30':'bg-purple-500/20 text-purple-400 border-purple-500/30';
+              const speciesColor=entry.speciesName==='Hybrid'?'text-green-400':entry.speciesName==='Cyan'?'text-cyan-400':entry.speciesName==='Predator'?'text-red-400':'text-yellow-400';
+              return<div key={entry.id} className="flex items-center gap-2 p-1.5 rounded bg-gray-900/30 text-xs">
+                <span className="text-gray-500 w-14">{entry.timestamp}</span>
+                <span>{entry.info.emoji}</span>
+                <span style={{color:entry.info.color}} className="font-medium">{entry.info.name}</span>
+                <span className={`px-1.5 py-0.5 rounded border ${eventColor}`}>{eventLabel}</span>
+                <span className={speciesColor}>{entry.speciesName}</span>
+              </div>})}</div>}
           </div>
         </div>
       </div>
+
+      {predatorRoster.length>0&&(
+      <div className="w-full max-w-5xl mt-1">
+        <div className="flex items-center gap-2 mb-1"><span className="text-red-400 text-sm font-bold">👁 Predator Roster</span><span className="text-gray-600 text-xs">({predatorRoster.length} predators)</span></div>
+        <div className="bg-gray-800 rounded border border-red-900 h-32 overflow-y-auto scroll-stable">
+          <div className="p-2 flex flex-wrap gap-2">{predatorRoster.map(pred=>(
+            <div key={pred.id} className={`p-2 rounded bg-red-900/20 border ${pred.isLeader?'border-yellow-500':'border-red-700'} cursor-pointer hover:bg-red-900/40`} onClick={()=>{setSelectedPredator(pred.id);setShowPredMutPanel(true)}}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-red-400 font-bold">Gen {pred.generation}</span>
+                {pred.isLeader&&<span className="text-yellow-400">👑</span>}
+                <span className="text-gray-400 text-xs">⚔️ {pred.kills} kills</span>
+              </div>
+              <div className="flex items-center gap-1 text-xs">
+                <span className={pred.energy>100?'text-green-400':pred.energy>50?'text-yellow-400':'text-red-400'}>❤️ {Math.round(pred.energy)}%</span>
+              </div>
+              {pred.mutations.length>0&&<div className="flex flex-wrap gap-1 mt-1">{pred.mutations.map(mut=>{const info=mutationInfo[mut];return info?<span key={mut} className="inline-flex items-center gap-0.5 px-1 rounded text-xs" style={{backgroundColor:info.color+'22',color:info.color}}><span>{info.emoji}</span><span>{info.name}</span></span>:null})}</div>}
+            </div>
+          ))}</div>
+        </div>
+      </div>
+      )}
       
       <div className="w-full max-w-5xl mt-1 p-1 bg-gray-800/50 rounded border border-gray-700">
         <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).map(([key,info])=><span key={key} className="text-xs" style={{color:info.color}} title={info.desc}>{info.emoji}</span>)}</div>
