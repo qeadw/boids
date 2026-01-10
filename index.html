@@ -170,8 +170,8 @@ class Predator{
         if(!target.mutations.fighter&&!target.nearDeathTriggered){target.nearDeathCount=(target.nearDeathCount||0)+1;target.nearDeathTriggered=true;if(Math.random()<0.03){target.mutations.fighter=true;target.canFight=true;target.justEvolvedFighter=true}}
         // Electric shock
         if(target.mutations.electric&&Math.random()<0.4){this.energy-=20;target.fear=0.8;return null}
-        // Fighter mutation - 50% chance to fight, 40% of fights kill the predator
-        if(target.mutations.fighter&&Math.random()<0.5){target.justFoughtOff=true;if(Math.random()<0.4){this.killedByFighter=true;target.justKilledPredator=true}else{this.energy-=25}target.fear=0.3;return null}
+        // Fighter mutation - uses mutationMultipliers for fight/kill chances
+        if(target.mutations.fighter&&Math.random()<mutationMultipliers.fighter.fightChance){target.justFoughtOff=true;if(Math.random()<mutationMultipliers.fighter.killChance){this.killedByFighter=true;target.justKilledPredator=true}else{this.energy-=25}target.fear=0.3;return null}
         // Lucky mutation gives better odds
         if(target.mutations.lucky&&Math.random()<0.3){target.fear=1;return null}
         // Acrobat dodge
@@ -219,18 +219,18 @@ class Boid{
     this.applyMutationEffects()
   }
   applyMutationEffects(){
-    this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier=1.5;if(this.mutations.tiny)this.sizeMultiplier=0.6;if(this.mutations.fat)this.sizeMultiplier=1.3;if(this.mutations.chonky)this.sizeMultiplier*=1.2;
-    this.speedMultiplier=1;if(this.mutations.speedy)this.speedMultiplier=1.4;if(this.mutations.tiny)this.speedMultiplier*=1.2;if(this.mutations.giant)this.speedMultiplier*=0.85;if(this.mutations.fat)this.speedMultiplier*=0.7;if(this.mutations.flightless)this.speedMultiplier*=0.5;if(this.mutations.mechanical)this.speedMultiplier*=1.1;if(this.mutations.swift)this.speedMultiplier*=1.15;if(this.mutations.wings)this.speedMultiplier*=1.3;if(this.mutations.chonky)this.speedMultiplier*=0.8;
-    if(this.mutations.longlived)this.maxAge*=1.5;if(this.mutations.immortal)this.maxAge=Infinity;if(this.mutations.fragile)this.maxAge*=0.6;
-    this.fatigueResistance=this.mutations.tough?0.5:this.mutations.mechanical?0.3:this.mutations.wings?0.4:this.mutations.hermit?0.4:1;if(this.mutations.paper)this.fatigueResistance=2;if(this.mutations.sleepy)this.fatigueResistance*=1.5;if(this.mutations.stubborn)this.fatigueResistance=0;
+    const mm=mutationMultipliers;
+    this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier*=mm.giant.size;if(this.mutations.tiny)this.sizeMultiplier*=mm.tiny.size;if(this.mutations.fat)this.sizeMultiplier*=mm.fat.size;if(this.mutations.chonky)this.sizeMultiplier*=mm.chonky.size;
+    this.speedMultiplier=1;if(this.mutations.speedy)this.speedMultiplier*=mm.speedy.speed;if(this.mutations.tiny)this.speedMultiplier*=mm.tiny.speed;if(this.mutations.giant)this.speedMultiplier*=mm.giant.speed;if(this.mutations.fat)this.speedMultiplier*=mm.fat.speed;if(this.mutations.flightless)this.speedMultiplier*=0.5;if(this.mutations.mechanical)this.speedMultiplier*=mm.mechanical.speed;if(this.mutations.swift)this.speedMultiplier*=mm.swift.speed;if(this.mutations.wings)this.speedMultiplier*=mm.wings.speed;if(this.mutations.chonky)this.speedMultiplier*=mm.chonky.speed;
+    if(this.mutations.longlived)this.maxAge*=mm.longlived.lifespan;if(this.mutations.immortal)this.maxAge=Infinity;if(this.mutations.fragile)this.maxAge*=mm.fragile.lifespan;
+    this.fatigueResistance=this.mutations.tough?mm.tough.fatigue:this.mutations.mechanical?mm.mechanical.fatigue:this.mutations.wings?mm.wings.fatigue:this.mutations.hermit?0.4:1;if(this.mutations.paper)this.fatigueResistance=2;if(this.mutations.sleepy)this.fatigueResistance*=1.5;if(this.mutations.stubborn)this.fatigueResistance=0;
     if(this.mutations.zen)this.bravery=Math.min(1,this.bravery+0.4);if(this.mutations.wise)this.bravery=Math.min(1,this.bravery+0.3);
     this.isNocturnal=!!this.mutations.nocturnal;this.hasArmor=!!this.mutations.plated;this.ravenous=!!this.mutations.ravenous;this.hasCamouflage=!!this.mutations.camouflage||!!this.mutations.silent;
     if(this.mutations.magnetic)this.sociability=Math.min(1,this.sociability+0.5);if(this.mutations.bullied)this.sociability=Math.max(0,this.sociability-0.4);if(this.mutations.hermit)this.sociability=Math.max(0,this.sociability-0.6);if(this.mutations.leader)this.sociability=Math.min(1,this.sociability+0.3);
-    this.fertilityBonus=this.mutations.fertile?2:1;this.isAggressive=!!this.mutations.aggressive;this.isRainbow=!!this.mutations.rainbow;this.isGlowing=!!this.mutations.glowing||!!this.mutations.mechanical||!!this.mutations.electric;
-    this.maxEnergy=this.mutations.bigstomach?200:this.mutations.smallstomach?50:100;
-    this.energyDrain=this.mutations.immortal?3:this.mutations.smallstomach?0.66:this.mutations.mechanical?0.5:this.mutations.fluffy?0.7:1;if(this.mutations.vampire)this.energyDrain*=1.3;
+    this.fertilityBonus=this.mutations.fertile?mm.fertile.reproduce:1;this.isAggressive=!!this.mutations.aggressive;this.isRainbow=!!this.mutations.rainbow;this.isGlowing=!!this.mutations.glowing||!!this.mutations.mechanical||!!this.mutations.electric;
+    this.maxEnergy=this.mutations.bigstomach?100*mm.bigstomach.capacity:this.mutations.smallstomach?100*mm.smallstomach.capacity:100;
+    this.energyDrain=this.mutations.immortal?mm.immortal.drain:this.mutations.smallstomach?mm.smallstomach.drain:this.mutations.mechanical?mm.mechanical.drain:this.mutations.fluffy?mm.fluffy.drain:1;if(this.mutations.vampire)this.energyDrain*=1.3;
     if(this.mutations.bullied)this.fear=Math.min(1,this.fear+0.3);
-    // Fighter, scout, lucky, acrobat affect catch chance in predator.hunt()
     this.canFight=!!this.mutations.fighter;this.isScout=!!this.mutations.scout;this.isLucky=!!this.mutations.lucky;this.isAcrobat=!!this.mutations.acrobat;this.isElectric=!!this.mutations.electric;this.isLoud=!!this.mutations.loud;this.isCursed=!!this.mutations.cursed;
   }
   getMutationCount(){return Object.keys(this.mutations).length}
@@ -353,6 +353,14 @@ class Boid{
   }
 }
 
+const mutationMultipliers={
+  giant:{size:1.5,speed:0.85},tiny:{size:0.6,speed:1.2},speedy:{speed:1.4},fat:{size:1.3,speed:0.7},
+  swift:{speed:1.15},wings:{speed:1.3,fatigue:0.4},chonky:{size:1.2,speed:0.8},longlived:{lifespan:1.5},
+  fragile:{lifespan:0.6},tough:{fatigue:0.5},mechanical:{speed:1.1,fatigue:0.3,drain:0.5},
+  bigstomach:{capacity:2,foodgain:2},smallstomach:{capacity:0.5,drain:0.66},immortal:{drain:3},
+  fertile:{reproduce:2},fighter:{fightChance:0.5,killChance:0.4},fluffy:{drain:0.7},berserker:{speed:1.4}
+};
+
 const mutationInfo={
   // Good mutations
   giant:{emoji:'🦣',name:'Giant',desc:'1.5x size, slower',color:'#a855f7',type:'good'},
@@ -438,7 +446,13 @@ function App(){
   useEffect(()=>{showTrailsRef.current=showTrails},[showTrails]);
   useEffect(()=>{cursorModeRef.current=cursorMode},[cursorMode]);
   useEffect(()=>{favoriteRef.current=favoriteBoid},[favoriteBoid]);
-  
+
+  useEffect(()=>{
+    const handleKeyDown=(e)=>{if(e.code==='Space'&&e.target.tagName!=='INPUT'){e.preventDefault();setPaused(p=>!p)}};
+    window.addEventListener('keydown',handleKeyDown);
+    return()=>window.removeEventListener('keydown',handleKeyDown);
+  },[]);
+
   const addRipple=useCallback((x,y,color,size)=>{stateRef.current.ripples.push(new Ripple(x,y,color,size))},[]);
   const addMutationLog=useCallback((type,event,boidSpecies,isHybrid)=>{const info=mutationInfo[type];if(!info)return;const speciesName=isHybrid?'Hybrid':(boidSpecies===0?'Cyan':'Gold');const logEntry={id:Date.now()+Math.random(),timestamp:new Date().toLocaleTimeString(),type,info,speciesName,event};mutationLogRef.current=[logEntry,...mutationLogRef.current];setMutationLog([...mutationLogRef.current])},[]);
   const addDangerZone=useCallback((x,y)=>{const state=stateRef.current;for(const z of state.dangerZones)if(z.position.distSq(new Vector2(x,y))<1600)return;state.dangerZones.push(new DangerZone(x,y))},[]);
@@ -733,6 +747,18 @@ function App(){
                 return<div key={key} className="flex items-center gap-2 p-2 rounded bg-purple-900/20 border border-purple-800/30">
                   <span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span><span className="text-purple-400 font-bold">({count})</span>
                 </div>})}</div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h4 className="text-orange-400 font-bold mb-2">⚙️ Mutation Multipliers (edit values, then click Apply)</h4>
+              <div className="grid grid-cols-3 gap-2 mb-2 text-xs">
+                {Object.entries(mutationMultipliers).map(([mut,vals])=>{
+                  const info=mutationInfo[mut];
+                  return<div key={mut} className="p-2 rounded bg-gray-800 border border-gray-700">
+                    <div className="flex items-center gap-1 mb-1"><span>{info?.emoji}</span><span style={{color:info?.color}} className="font-medium">{info?.name}</span></div>
+                    <div className="flex flex-wrap gap-1">{Object.entries(vals).map(([k,v])=><label key={k} className="flex items-center gap-1"><span className="text-gray-400">{k}:</span><input type="number" step="0.1" defaultValue={v} className="w-12 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center" data-mut={mut} data-key={k}/></label>)}</div>
+                  </div>})}
+              </div>
+              <button onClick={()=>{document.querySelectorAll('[data-mut]').forEach(inp=>{const m=inp.dataset.mut,k=inp.dataset.key,v=parseFloat(inp.value);if(!isNaN(v))mutationMultipliers[m][k]=v});stateRef.current.boids.forEach(b=>b.applyMutationEffects());stateRef.current.predators.forEach(p=>p.applyMutationEffects&&p.applyMutationEffects())}} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 rounded text-sm">Apply Multiplier Changes</button>
             </div>
             <div className="mt-4 pt-4 border-t border-gray-700">
               <h4 className="text-cyan-400 font-bold mb-2">Quick Actions</h4>
