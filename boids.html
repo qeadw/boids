@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Living World - Boids</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{margin:0;background:#111827;}input[type=number],input[type=range]{-moz-appearance:textfield;}input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}.scroll-stable{overflow-anchor:none;}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useRef,useCallback}=React;
+const MAX_SPEED=4,MAX_FORCE=0.15;
+
+// Spatial hash for optimization
+class SpatialHash{
+  constructor(cellSize=50){this.cellSize=cellSize;this.cells=new Map()}
+  clear(){this.cells.clear()}
+  getKey(x,y){return`${Math.floor(x/this.cellSize)},${Math.floor(y/this.cellSize)}`}
+  insert(obj){const key=this.getKey(obj.position.x,obj.position.y);if(!this.cells.has(key))this.cells.set(key,[]);this.cells.get(key).push(obj)}
+  getNearby(x,y,radius=1){const results=[];const cx=Math.floor(x/this.cellSize),cy=Math.floor(y/this.cellSize);for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++){const key=`${cx+dx},${cy+dy}`;if(this.cells.has(key))results.push(...this.cells.get(key))}return results}
+}
+
+class Vector2{
+  constructor(x=0,y=0){this.x=x;this.y=y}
+  add(v){return new Vector2(this.x+v.x,this.y+v.y)}
+  sub(v){return new Vector2(this.x-v.x,this.y-v.y)}
+  mult(n){return new Vector2(this.x*n,this.y*n)}
+  div(n){return n===0?new Vector2():new Vector2(this.x/n,this.y/n)}
+  mag(){return Math.sqrt(this.x*this.x+this.y*this.y)}
+  magSq(){return this.x*this.x+this.y*this.y}
+  normalize(){const m=this.mag();return m===0?new Vector2():this.div(m)}
+  limit(max){const msq=this.magSq();return msq>max*max?this.normalize().mult(max):this.copy()}
+  copy(){return new Vector2(this.x,this.y)}
+  dist(v){return this.sub(v).mag()}
+  distSq(v){const dx=this.x-v.x,dy=this.y-v.y;return dx*dx+dy*dy}
+  static fromAngle(a,m=1){return new Vector2(Math.cos(a)*m,Math.sin(a)*m)}
+}
+
+class Ripple{
+  constructor(x,y,color,maxRadius=40){this.position=new Vector2(x,y);this.radius=5;this.maxRadius=maxRadius;this.color=color;this.alpha=0.8}
+  update(){this.radius+=2;this.alpha-=0.03;return this.alpha>0}
+  draw(ctx){ctx.strokeStyle=this.color.replace(')',`,${this.alpha})`).replace('rgb','rgba');ctx.lineWidth=2;ctx.beginPath();ctx.arc(this.position.x,this.position.y,this.radius,0,Math.PI*2);ctx.stroke()}
+}
+
+class DangerZone{
+  constructor(x,y){this.position=new Vector2(x,y);this.intensity=1;this.radius=70}
+  update(){this.intensity-=0.002;return this.intensity>0}
+  draw(ctx){const g=ctx.createRadialGradient(this.position.x,this.position.y,0,this.position.x,this.position.y,this.radius);g.addColorStop(0,`rgba(255,0,0,${this.intensity*0.1})`);g.addColorStop(1,'rgba(255,0,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(this.position.x,this.position.y,this.radius,0,Math.PI*2);ctx.fill()}
+}
+
+class Shelter{
+  constructor(x,y){this.position=new Vector2(x,y);this.radius=50;this.capacity=15;this.occupants=0}
+  contains(pos){return this.position.distSq(pos)<this.radius*this.radius}
+  draw(ctx,dayPhase){ctx.fillStyle=`rgba(40,35,30,${0.8+(1-dayPhase)*0.2})`;ctx.beginPath();ctx.arc(this.position.x,this.position.y+10,this.radius,Math.PI,0);ctx.fill();ctx.strokeStyle='rgba(100,200,100,0.2)';ctx.setLineDash([5,5]);ctx.beginPath();ctx.arc(this.position.x,this.position.y,this.radius,0,Math.PI*2);ctx.stroke();ctx.setLineDash([])}
+}
+
+class Nest{
+  constructor(x,y,species){this.position=new Vector2(x,y);this.species=species;this.births=0}
+  draw(ctx){ctx.fillStyle=`hsla(${this.species===0?30:45},40%,30%,0.6)`;ctx.beginPath();ctx.ellipse(this.position.x,this.position.y,20,12,0,0,Math.PI*2);ctx.fill()}
+}
+
+class Tree{
+  constructor(x,y){this.position=new Vector2(x,y);this.height=60+Math.random()*40;this.width=40+Math.random()*20;this.perch=new Perch(x,y-this.height+15,this.width*0.8)}
+  spawnBug(){return new Bug(this.position.x+(Math.random()-0.5)*this.width,this.position.y-this.height*0.5)}
+  draw(ctx,dayPhase){ctx.fillStyle=`rgba(60,40,30,${0.8+dayPhase*0.2})`;ctx.fillRect(this.position.x-8,this.position.y-this.height,16,this.height);ctx.fillStyle=`rgba(${30+dayPhase*20},${80+dayPhase*40},${30+dayPhase*20},0.9)`;ctx.beginPath();ctx.ellipse(this.position.x,this.position.y-this.height,this.width/2,this.height*0.4,0,0,Math.PI*2);ctx.fill();ctx.fillStyle=`rgba(${20+dayPhase*15},${60+dayPhase*30},${20+dayPhase*15},0.8)`;ctx.beginPath();ctx.ellipse(this.position.x-10,this.position.y-this.height+10,this.width*0.3,this.height*0.25,0,0,Math.PI*2);ctx.fill();this.perch.draw(ctx,dayPhase)}
+}
+
+class Pond{
+  constructor(x,y,w,h){this.position=new Vector2(x,y);this.width=w;this.height=h;this.fish=[];this.maxFish=8}
+  update(){if(this.fish.length<this.maxFish&&Math.random()<0.01)this.fish.push({x:(Math.random()-0.5)*this.width*0.8,y:(Math.random()-0.5)*this.height*0.6,phase:Math.random()*Math.PI*2});for(let f of this.fish){f.x+=Math.sin(f.phase)*0.3;f.phase+=0.02}}
+  tryFish(boid){if(this.fish.length===0)return{caught:false};if(Math.random()<0.1)return{caught:false,drowned:true};this.fish.pop();return{caught:true,food:25}}
+  draw(ctx,time){const g=ctx.createRadialGradient(this.position.x,this.position.y,0,this.position.x,this.position.y,Math.max(this.width,this.height)/2);g.addColorStop(0,'rgba(30,80,120,0.8)');g.addColorStop(0.7,'rgba(40,100,140,0.7)');g.addColorStop(1,'rgba(50,120,160,0.5)');ctx.fillStyle=g;ctx.beginPath();ctx.ellipse(this.position.x,this.position.y,this.width/2,this.height/2,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,150,50,0.7)';for(let f of this.fish){ctx.beginPath();ctx.ellipse(this.position.x+f.x,this.position.y+f.y,4,2,Math.sin(f.phase)*0.3,0,Math.PI*2);ctx.fill()}}
+}
+
+class Perch{
+  constructor(x,y,width){this.position=new Vector2(x,y);this.width=width;this.occupants=[];this.maxOccupants=Math.floor(width/12)}
+  getRestSpot(){if(this.occupants.length>=this.maxOccupants)return null;const spacing=this.width/(this.maxOccupants+1);return new Vector2(this.position.x-this.width/2+spacing*(this.occupants.length+1),this.position.y-5)}
+  draw(ctx,dayPhase){ctx.strokeStyle=`rgba(80,60,40,${0.6+dayPhase*0.2})`;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(this.position.x-this.width/2,this.position.y);ctx.lineTo(this.position.x+this.width/2,this.position.y);ctx.stroke()}
+}
+
+class FoodSource{
+  constructor(x,y){this.position=new Vector2(x,y);this.amount=100;this.phase=Math.random()*Math.PI*2}
+  draw(ctx,time,season){if(this.amount<=0)return;const pulse=(Math.sin(time*0.003+this.phase)+1)/2*0.2+0.8;const sm=season>0.75||season<0.1?0.5:1;const r=25*(this.amount/100)*pulse*sm;const g=ctx.createRadialGradient(this.position.x,this.position.y,0,this.position.x,this.position.y,r*1.5);g.addColorStop(0,`rgba(100,255,150,${0.5*pulse})`);g.addColorStop(1,'rgba(100,255,150,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(this.position.x,this.position.y,r*1.5,0,Math.PI*2);ctx.fill()}
+}
+
+class Bug{
+  constructor(x,y){this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,1+Math.random());this.energy=20;this.size=2+Math.random()*2;this.hue=Math.random()>0.5?60:120;this.lifetime=500+Math.random()*500}
+  update(w,h,obstacles){
+    this.lifetime--;if(this.lifetime<=0||this.energy<=0)return false;
+    this.velocity=this.velocity.add(Vector2.fromAngle(Math.random()*Math.PI*2,0.15)).limit(2);
+    const nextPos=this.position.add(this.velocity);
+    for(const o of obstacles){if(nextPos.distSq(o)<18*18){this.velocity=this.position.sub(o).normalize().mult(2);break}}
+    this.position=this.position.add(this.velocity);
+    if(this.position.x<0)this.position.x=w;if(this.position.x>w)this.position.x=0;if(this.position.y<0)this.position.y=h;if(this.position.y>h)this.position.y=0;return true
+  }
+  draw(ctx){ctx.fillStyle=`hsla(${this.hue},60%,50%,0.8)`;ctx.beginPath();ctx.arc(this.position.x,this.position.y,this.size,0,Math.PI*2);ctx.fill()}
+}
+
+class Corpse{
+  constructor(x,y,species){this.position=new Vector2(x,y);this.species=species;this.nutrition=40;this.decay=1}
+  update(){this.decay-=0.001;return this.decay>0&&this.nutrition>0}
+  draw(ctx){ctx.fillStyle=`rgba(100,80,60,${this.decay*0.6})`;ctx.beginPath();ctx.arc(this.position.x,this.position.y,4*this.decay,0,Math.PI*2);ctx.fill()}
+}
+
+class Predator{
+  constructor(x,y,packId=0,gen=0,mutations={}){this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2);this.acceleration=new Vector2();this.baseSpeed=3.5+gen*0.3;this.maxSpeed=this.baseSpeed;this.maxForce=0.1+gen*0.02;this.energy=100;this.packId=packId;this.isLeader=false;this.generation=gen;this.kills=0;this.mutations=mutations;this.targetBoid=null}
+  edges(w,h){if(this.position.x>w)this.position.x=0;if(this.position.x<0)this.position.x=w;if(this.position.y>h)this.position.y=0;if(this.position.y<0)this.position.y=h}
+  hunt(boids,predators,shelters,dayPhase,spatialHash){
+    const agg=1+(1-dayPhase)*0.5;this.maxSpeed=this.baseSpeed+(1-dayPhase)*2;
+    const pack=predators.filter(p=>p.packId===this.packId);const leader=pack.find(p=>p.isLeader)||pack[0];if(leader)leader.isLeader=true;
+    let target=null,targetDist=Infinity;
+    const nearby=spatialHash.getNearby(this.position.x,this.position.y,3);
+    for(const boid of nearby){
+      if(!(boid instanceof Boid))continue;
+      let inShelter=false;for(const s of shelters)if(s.contains(boid.position)){inShelter=true;break}
+      if(inShelter)continue;
+      const d=this.position.distSq(boid.position);
+      let priority=d;if(boid.mutations.tasty)priority*=0.25;if(boid.isCollapsed)priority*=0.09;priority*=(1-boid.energy/100)*0.5+0.5;
+      if(d<22500*agg*agg&&priority<targetDist){targetDist=priority;target=boid}
+    }
+    this.targetBoid=target;
+    let steering=new Vector2();
+    if(target){
+      const pred=target.position.add(target.velocity.mult(8));
+      steering=pred.sub(this.position).normalize().mult(this.maxSpeed).sub(this.velocity).limit(this.maxForce*agg);
+      const catchD=target.mutations.camouflage?8:target.mutations.fat?15:12;
+      const actualDist=Math.sqrt(this.position.distSq(target.position));
+      if(actualDist<catchD){
+        if(target.mutations.plated&&target.hasArmor){target.hasArmor=false;target.mutations.plated=false;target.fear=1;target.armorJustBroke=true;this.energy=Math.min(150,this.energy+10);return null}
+        if(target.mutations.paper||Math.random()>0.1||target.mutations.tasty){
+          this.energy=Math.min(150,this.energy+(target.mutations.tasty?60:45));this.kills++;
+          if(Math.random()<0.05&&Object.keys(target.mutations).length>0){const muts=Object.keys(target.mutations);const inheritMut=muts[Math.floor(Math.random()*muts.length)];if(!['traitor','egggiver'].includes(inheritMut))this.mutations[inheritMut]=true}
+          return target
+        }
+      }
+    }
+    this.acceleration=this.acceleration.add(steering);return null
+  }
+  update(w,h,obstacles){
+    this.energy-=0.04;
+    for(const o of obstacles){const d=this.position.distSq(o);if(d<30*30){const away=this.position.sub(o).normalize().mult(MAX_FORCE*3);this.acceleration=this.acceleration.add(away)}}
+    this.velocity=this.velocity.add(this.acceleration).limit(this.maxSpeed);this.position=this.position.add(this.velocity);this.acceleration=new Vector2();this.edges(w,h);return this.energy>0
+  }
+  draw(ctx,time,dayPhase){const angle=Math.atan2(this.velocity.y,this.velocity.x);const size=12+this.generation*2;ctx.save();ctx.translate(this.position.x,this.position.y);ctx.rotate(angle);const ng=1-dayPhase;const g=ctx.createRadialGradient(0,0,0,0,0,25+ng*15);g.addColorStop(0,`rgba(255,50,50,${0.3+ng*0.3})`);g.addColorStop(1,'rgba(255,50,50,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,25+ng*15,0,Math.PI*2);ctx.fill();if(this.isLeader){ctx.fillStyle='rgba(255,215,0,0.9)';ctx.beginPath();ctx.moveTo(-6,-size*0.8);ctx.lineTo(-3,-size*0.5);ctx.lineTo(0,-size*0.8);ctx.lineTo(3,-size*0.5);ctx.lineTo(6,-size*0.8);ctx.lineTo(4,-size*0.4);ctx.lineTo(-4,-size*0.4);ctx.fill()}ctx.fillStyle=`hsl(0,80%,${35+this.energy*0.15}%)`;ctx.beginPath();ctx.moveTo(size,0);ctx.lineTo(-size*0.5,-size*0.6);ctx.lineTo(-size*0.3,0);ctx.lineTo(-size*0.5,size*0.6);ctx.closePath();ctx.fill();if(Object.keys(this.mutations).length>0){ctx.strokeStyle='rgba(255,200,0,0.5)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,size+4,0,Math.PI*2);ctx.stroke()}ctx.restore()}
+}
+
+class Boid{
+  constructor(x,y,species=0,parentTraits=null,isHybrid=false,parentMutations=null,mutMult=1,forceMutation=null){
+    this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2+Math.random()*2);this.acceleration=new Vector2();this.species=species;this.isHybrid=isHybrid;this.id=Math.random().toString(36).substr(2,9);
+    this.hue=isHybrid?120+Math.random()*30:species===0?190+Math.random()*30:40+Math.random()*30;
+    this.trail=[];this.fear=0;this.energy=50+Math.random()*50;this.fatigue=0;this.age=0;this.maxAge=8000+Math.random()*4000;
+    this.isPerching=false;this.perchTarget=null;this.isCollapsed=false;this.collapseTimer=0;this.matingDisplay=0;this.friend=null;this.friendBond=0;
+    this.maxEnergy=100;this.energyDrain=1;this.isFishing=false;this.fishTimer=0;
+    if(parentTraits){this.bravery=Math.max(0,Math.min(1,parentTraits.bravery+(Math.random()-0.5)*0.2));this.hunger=Math.max(0,Math.min(1,parentTraits.hunger+(Math.random()-0.5)*0.2));this.laziness=Math.max(0,Math.min(1,parentTraits.laziness+(Math.random()-0.5)*0.2));this.sociability=Math.max(0,Math.min(1,parentTraits.sociability+(Math.random()-0.5)*0.2))}
+    else{this.bravery=Math.random();this.hunger=Math.random();this.laziness=Math.random();this.sociability=Math.random()}
+    if(isHybrid){const traits=['bravery','hunger','laziness','sociability'];this[traits[Math.floor(Math.random()*4)]]=Math.min(1,this[traits[0]]+0.2);this.maxAge*=1.1}
+    this.mutations={};
+    if(parentMutations){const{parent1Muts,parent2Muts}=parentMutations;const all=new Set([...Object.keys(parent1Muts||{}),...Object.keys(parent2Muts||{})]);for(const m of all){if(m==='egggiver')continue;const p1=parent1Muts&&parent1Muts[m],p2=parent2Muts&&parent2Muts[m];if(p1&&p2)this.mutations[m]=true;else if((p1||p2)&&Math.random()<0.5)this.mutations[m]=true}}
+    if(forceMutation)this.mutations[forceMutation]=true;
+    else if(Math.random()<0.03*mutMult){const possible=['giant','tiny','glowing','speedy','tough','longlived','fertile','camouflage','aggressive','magnetic','nocturnal','plated','ravenous','zen','rainbow','cannibal','immortal','bigstomach','smallstomach','traitor','egggiver','fat','paper','flightless','mechanical','tasty','bullied'];const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true}
+    this.applyMutationEffects()
+  }
+  applyMutationEffects(){
+    this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier=1.5;if(this.mutations.tiny)this.sizeMultiplier=0.6;if(this.mutations.fat)this.sizeMultiplier=1.3;
+    this.speedMultiplier=1;if(this.mutations.speedy)this.speedMultiplier=1.4;if(this.mutations.tiny)this.speedMultiplier*=1.2;if(this.mutations.giant)this.speedMultiplier*=0.85;if(this.mutations.fat)this.speedMultiplier*=0.7;if(this.mutations.flightless)this.speedMultiplier*=0.5;if(this.mutations.mechanical)this.speedMultiplier*=1.1;
+    if(this.mutations.longlived)this.maxAge*=1.5;if(this.mutations.immortal)this.maxAge=Infinity;
+    this.fatigueResistance=this.mutations.tough?0.5:this.mutations.mechanical?0.3:1;if(this.mutations.paper)this.fatigueResistance=2;
+    if(this.mutations.zen)this.bravery=Math.min(1,this.bravery+0.4);
+    this.isNocturnal=!!this.mutations.nocturnal;this.hasArmor=!!this.mutations.plated;this.ravenous=!!this.mutations.ravenous;this.hasCamouflage=!!this.mutations.camouflage;
+    if(this.mutations.magnetic)this.sociability=Math.min(1,this.sociability+0.5);if(this.mutations.bullied)this.sociability=Math.max(0,this.sociability-0.4);
+    this.fertilityBonus=this.mutations.fertile?2:1;this.isAggressive=!!this.mutations.aggressive;this.isRainbow=!!this.mutations.rainbow;this.isGlowing=!!this.mutations.glowing||!!this.mutations.mechanical;
+    this.maxEnergy=this.mutations.bigstomach?200:this.mutations.smallstomach?50:100;
+    this.energyDrain=this.mutations.immortal?3:this.mutations.smallstomach?0.66:this.mutations.mechanical?0.5:1;
+    if(this.mutations.bullied)this.fear=Math.min(1,this.fear+0.3);
+  }
+  getMutationCount(){return Object.keys(this.mutations).length}
+  getMutationList(){return Object.keys(this.mutations)}
+  edges(w,h,predators){
+    const margin=30;let dominated=false;
+    for(const p of predators){if(p.targetBoid===this&&this.position.distSq(p.position)<10000){dominated=true;break}}
+    if(dominated){
+      if(this.position.x<margin)this.acceleration=this.acceleration.add(new Vector2(MAX_FORCE*3,0));
+      if(this.position.x>w-margin)this.acceleration=this.acceleration.add(new Vector2(-MAX_FORCE*3,0));
+      if(this.position.y<margin)this.acceleration=this.acceleration.add(new Vector2(0,MAX_FORCE*3));
+      if(this.position.y>h-margin)this.acceleration=this.acceleration.add(new Vector2(0,-MAX_FORCE*3));
+    }
+    if(this.position.x>w)this.position.x=0;if(this.position.x<0)this.position.x=w;
+    if(this.position.y>h)this.position.y=0;if(this.position.y<0)this.position.y=h;
+  }
+  flock(nearbyBoids,obstacles,predators,dangerZones,shelters,perches,dayPhase,cursorPos,cursorMode,pond,cursorStrength){
+    if(this.isFishing||this.isCollapsed||this.isPerching)return;
+    if(this.fatigue>150){this.isCollapsed=true;this.collapseTimer=100;this.velocity=new Vector2();return}
+    
+    // Separation, alignment, cohesion with nearby boids only
+    let sep=new Vector2(),ali=new Vector2(),coh=new Vector2(),sepCt=0,aliCt=0,cohCt=0;
+    const cohRadius=50*(1+(1-dayPhase)*0.5+this.sociability*0.3);
+    for(const other of nearbyBoids){
+      if(other===this||other.isPerching||other.isCollapsed)continue;
+      const dsq=this.position.distSq(other.position);
+      if(dsq<625){sep=sep.add(this.position.sub(other.position).div(dsq+0.001));sepCt++}
+      const canFlock=this.isHybrid||other.isHybrid||other.species===this.species;
+      if(canFlock){if(dsq<2500){ali=ali.add(other.velocity);aliCt++}if(dsq<cohRadius*cohRadius){coh=coh.add(other.position);cohCt++}}
+    }
+    if(sepCt>0)sep=sep.div(sepCt).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE).mult(1.8);
+    if(aliCt>0)ali=ali.div(aliCt).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE);
+    if(cohCt>0)coh=coh.div(cohCt).sub(this.position).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE).mult(1+this.sociability*0.3);
+    
+    // Flee from predators - HIGH PRIORITY
+    let flee=new Vector2();this.fear=this.mutations.bullied?0.3:0;
+    const fleeRadius=100+(1-this.bravery)*50;
+    let inShelter=false;for(const s of shelters)if(s.contains(this.position)){inShelter=true;this.fear=this.mutations.bullied?0.2:0;break}
+    if(!inShelter){for(const pred of predators){const dsq=this.position.distSq(pred.position);if(dsq<fleeRadius*fleeRadius){const d=Math.sqrt(dsq);flee=flee.add(this.position.sub(pred.position).div(d+0.001));this.fear=Math.max(this.fear,1-d/fleeRadius)}}}
+    if(flee.mag()>0)flee=flee.normalize().mult(MAX_SPEED*(1.5+this.bravery*0.3)).sub(this.velocity).limit(MAX_FORCE*3);
+    
+    // Avoid obstacles - especially when fleeing
+    let obs=new Vector2();const obsAvoidRadius=this.fear>0.3?80:50;
+    for(const o of obstacles){const dsq=this.position.distSq(o);if(dsq<obsAvoidRadius*obsAvoidRadius){obs=obs.add(this.position.sub(o).div(dsq+0.001))}}
+    if(obs.mag()>0)obs=obs.normalize().mult(MAX_SPEED*(this.fear>0.3?1.5:1)).sub(this.velocity).limit(MAX_FORCE*(this.fear>0.3?3:2));
+    
+    // Danger zones
+    let danger=new Vector2();for(const zone of dangerZones){const dsq=this.position.distSq(zone.position);if(dsq<zone.radius*zone.radius)danger=danger.add(this.position.sub(zone.position).mult(zone.intensity))}
+    if(danger.mag()>0)danger=danger.normalize().mult(MAX_SPEED*0.5).sub(this.velocity).limit(MAX_FORCE);
+    
+    // Shelter seeking
+    let shelter=new Vector2();if(this.fear>0.3){let closest=null,closestDist=Infinity;for(const s of shelters){if(s.occupants>=s.capacity)continue;const d=this.position.distSq(s.position);if(d<closestDist){closestDist=d;closest=s}}if(closest&&closestDist<40000)shelter=closest.position.sub(this.position).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE*2)}
+    
+    // Perching
+    let perch=new Vector2();if(!this.mutations.flightless){const threshold=60+this.laziness*30;if(this.fatigue>=threshold&&dayPhase<=0.5){let closest=null,closestDist=Infinity;for(const p of perches){const spot=p.getRestSpot();if(!spot)continue;const d=this.position.distSq(spot);if(d<closestDist){closestDist=d;closest={perch:p,spot}}}if(closest&&closestDist<32400){this.perchTarget=closest;if(closestDist<100){this.isPerching=true;this.position=closest.spot.copy();this.velocity=new Vector2();closest.perch.occupants.push(this)}else perch=closest.spot.sub(this.position).normalize().mult(MAX_SPEED*0.6).sub(this.velocity).limit(MAX_FORCE)}}}
+    
+    // Pond seeking - only when desperate AND not fleeing
+    let pondSeek=new Vector2();if(pond&&this.energy<this.maxEnergy*0.15&&this.fear<0.3){const d=this.position.distSq(pond.position);if(d<6400){if(d<625&&pond.fish.length>0){this.isFishing=true;this.fishTimer=60;this.velocity=new Vector2()}else pondSeek=pond.position.sub(this.position).normalize().mult(MAX_SPEED*0.3).sub(this.velocity).limit(MAX_FORCE*0.5)}}
+    
+    // Cursor
+    let cursor=new Vector2();if(cursorPos&&cursorMode!=='none'){const dsq=this.position.distSq(cursorPos);if(dsq<10000){const d=Math.sqrt(dsq);cursor=cursorMode==='attract'?cursorPos.sub(this.position):this.position.sub(cursorPos);cursor=cursor.normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE*2*cursorStrength).mult(1-d/100)}}
+    
+    // Apply forces - flee and obstacle avoidance have highest priority
+    const fleeMult=this.fear>0.3?4:1;
+    this.acceleration=this.acceleration.add(flee.mult(fleeMult*(4-this.bravery))).add(obs.mult(this.fear>0.3?3:1)).add(shelter.mult(2)).add(sep).add(ali).add(coh).add(danger.mult(1.5)).add(perch.mult(1.5)).add(cursor).add(pondSeek.mult(this.fear<0.3?3:0))
+  }
+  update(w,h,dayPhase,shelters,pond,predators,obstacles){
+    this.age++;if(this.age>this.maxAge)return{alive:false,causeOfDeath:'age'};
+    if(this.isFishing){this.fishTimer--;if(this.fishTimer<=0){this.isFishing=false;if(pond){const result=pond.tryFish(this);if(result.drowned)return{alive:false,causeOfDeath:'drowned'};if(result.caught)this.energy=Math.min(this.maxEnergy,this.energy+result.food)}}return{alive:true}}
+    if(this.isPerching){this.fatigue=Math.max(0,this.fatigue-0.8);this.energy-=0.003*this.energyDrain;if((dayPhase>0.5&&this.fatigue<20)||this.fear>0.5){if(this.perchTarget){const idx=this.perchTarget.perch.occupants.indexOf(this);if(idx>-1)this.perchTarget.perch.occupants.splice(idx,1)}this.isPerching=false;this.perchTarget=null;this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2)}return{alive:this.energy>0,causeOfDeath:'starved'}}
+    if(this.isCollapsed){this.collapseTimer--;if(this.collapseTimer<=0){this.isCollapsed=false;this.fatigue=50}this.energy-=0.01*this.energyDrain;return{alive:this.energy>0,causeOfDeath:'starved'}}
+    this.trail.push(this.position.copy());if(this.trail.length>6)this.trail.shift();
+    for(const s of shelters)if(s.contains(this.position))s.occupants=Math.min(s.capacity,s.occupants+0.01);
+    this.energy-=(0.012+this.hunger*0.005)*this.energyDrain;this.fatigue+=(0.025-this.laziness*0.01)*(this.fatigueResistance||1);
+    if(this.fear>0){this.energy-=0.04*this.energyDrain;this.fatigue+=0.04*(this.fatigueResistance||1)}
+    if(this.isNocturnal&&dayPhase<0.4){this.energy+=0.005;this.fatigue-=0.01}
+    if(this.friend){const dsq=this.position.distSq(this.friend.position);if(dsq<2500){this.friendBond=Math.min(1,this.friendBond+0.001);this.fatigue-=0.005*this.friendBond}else if(dsq>40000){this.friendBond-=0.01;if(this.friendBond<=0)this.friend=null}}
+    if(this.matingDisplay>0)this.matingDisplay-=0.02;
+    const ageSlow=Math.max(0.5,1-(this.age/this.maxAge)*0.5);const speedMult=(0.6+dayPhase*0.4)*ageSlow*(this.speedMultiplier||1);const nocturnalBonus=(this.isNocturnal&&dayPhase<0.4)?1.3:1;
+    const currentMaxSpeed=MAX_SPEED*speedMult*(1+this.fear*0.5)*nocturnalBonus;
+    // Collision with obstacles
+    for(const o of obstacles){const dsq=this.position.distSq(o);if(dsq<20*20){const away=this.position.sub(o).normalize().mult(MAX_FORCE*4);this.acceleration=this.acceleration.add(away)}}
+    this.velocity=this.velocity.add(this.acceleration).limit(currentMaxSpeed);this.position=this.position.add(this.velocity);this.acceleration=new Vector2();this.edges(w,h,predators);
+    if(this.energy<=0)return{alive:false,causeOfDeath:'starved'};
+    if(this.shouldDie)return{alive:false,causeOfDeath:'eaten'};
+    return{alive:true}
+  }
+  canReproduce(nests,nearbyBoids,birthMult=1){
+    if(this.energy<75||this.age<400||this.fatigue>40)return{can:false};
+    let mate=null,isCrossBreed=false;for(const other of nearbyBoids){if(other===this||other.isCollapsed||other.isPerching||other.energy<60||other.age<400)continue;if(this.position.distSq(other.position)<625){mate=other;isCrossBreed=other.species!==this.species;break}}
+    if(!mate)return{can:false};
+    let nearNest=false;for(const n of nests)if((n.species===this.species||n.species===mate.species)&&this.position.distSq(n.position)<1225){nearNest=true;n.births++;break}
+    const baseChance=(nearNest?0.004:0.001)*birthMult;const fertilityMult=this.fertilityBonus*(mate.fertilityBonus||1);
+    if(Math.random()<(isCrossBreed?baseChance*0.3:baseChance)*fertilityMult)return{can:true,mate,isCrossBreed};return{can:false}
+  }
+  draw(ctx,showTrails,dayPhase,worldWidth,isFavorite){
+    let displayHue=this.hue;if(this.isRainbow)displayHue=(this.hue+this.age*0.5)%360;if(this.mutations.mechanical)displayHue=200;const sm=this.sizeMultiplier||1;
+    if(this.isFishing){ctx.fillStyle='rgba(100,150,255,0.5)';ctx.beginPath();ctx.arc(this.position.x,this.position.y,10,0,Math.PI*2);ctx.fill();ctx.fillStyle=`hsla(${displayHue},60%,50%,0.8)`;ctx.beginPath();ctx.arc(this.position.x,this.position.y-5,4*sm,0,Math.PI*2);ctx.fill();return}
+    if(this.isCollapsed){ctx.fillStyle=`hsla(${displayHue},40%,30%,0.7)`;ctx.beginPath();ctx.ellipse(this.position.x,this.position.y,6*sm,3*sm,0,0,Math.PI*2);ctx.fill();return}
+    if(this.isPerching){ctx.fillStyle=`hsla(${displayHue},60%,${30+dayPhase*20}%,0.9)`;ctx.beginPath();ctx.arc(this.position.x,this.position.y-3,5*sm,0,Math.PI*2);ctx.fill();return}
+    if(isFavorite){ctx.strokeStyle='rgba(255,215,0,0.8)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(this.position.x,this.position.y,18,0,Math.PI*2);ctx.stroke();ctx.fillStyle='rgba(255,215,0,0.3)';ctx.fill()}
+    if(showTrails&&this.trail.length>1){ctx.beginPath();ctx.moveTo(this.trail[0].x,this.trail[0].y);for(let i=1;i<this.trail.length;i++)ctx.lineTo(this.trail[i].x,this.trail[i].y);ctx.lineTo(this.position.x,this.position.y);ctx.strokeStyle=`hsla(${displayHue},70%,50%,0.4)`;ctx.lineWidth=2;ctx.stroke()}
+    const angle=Math.atan2(this.velocity.y,this.velocity.x);const ageSize=Math.max(0.7,1-(this.age/this.maxAge)*0.3);const size=(6+(this.energy/this.maxEnergy)*2)*ageSize*sm;
+    ctx.save();ctx.translate(this.position.x,this.position.y);
+    if(this.isGlowing){const gp=0.5+Math.sin(this.age*0.05)*0.3;const g=ctx.createRadialGradient(0,0,0,0,0,size*2.5);g.addColorStop(0,this.mutations.mechanical?`rgba(150,200,255,${gp*0.5})`:`hsla(${displayHue},80%,70%,${gp*0.5})`);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,size*2.5,0,Math.PI*2);ctx.fill()}
+    if(this.friend&&this.friendBond>0.3){const dx=this.friend.position.x-this.position.x,dy=this.friend.position.y-this.position.y;if(dx*dx+dy*dy<worldWidth*worldWidth*0.16){ctx.strokeStyle=`rgba(255,200,255,${this.friendBond*0.5})`;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(dx,dy);ctx.stroke()}}
+    ctx.rotate(angle);
+    if(this.fear>0){ctx.fillStyle=`rgba(255,200,100,${this.fear*0.3})`;ctx.beginPath();ctx.arc(0,0,12,0,Math.PI*2);ctx.fill()}
+    const mutCount=this.getMutationCount();if(mutCount>0){ctx.strokeStyle=`rgba(200,100,255,${0.4+Math.sin(this.age*0.03)*0.2})`;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,0,size+3,0,Math.PI*2);ctx.stroke()}
+    if(this.hasArmor){ctx.strokeStyle='rgba(150,150,200,0.6)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,size*0.8,-Math.PI*0.7,Math.PI*0.7);ctx.stroke()}
+    const ageGray=(this.age/this.maxAge)*30;const fatigueDim=Math.max(0.5,1-this.fatigue/150);const lightness=((40+dayPhase*20)+this.fear*20-ageGray)*fatigueDim;const baseAlpha=this.hasCamouflage?0.5:1;
+    let bodyColor;if(this.mutations.mechanical)bodyColor=`rgba(120,140,160,${baseAlpha})`;else if(this.mutations.paper)bodyColor=`rgba(240,240,230,${baseAlpha})`;else bodyColor=`hsla(${displayHue},${70-ageGray}%,${Math.max(20,lightness)}%,${baseAlpha})`;
+    ctx.fillStyle=bodyColor;ctx.beginPath();ctx.moveTo(size,0);ctx.lineTo(-size*0.6,-size*0.5);ctx.lineTo(-size*0.6,size*0.5);ctx.closePath();ctx.fill();
+    ctx.fillStyle=`rgba(255,255,255,${(0.5+dayPhase*0.3)*fatigueDim})`;ctx.beginPath();ctx.arc(0,0,1.5,0,Math.PI*2);ctx.fill();ctx.restore()
+  }
+}
+
+const mutationInfo={giant:{emoji:'🦣',name:'Giant',desc:'1.5x size, slower',color:'#a855f7',type:'good'},tiny:{emoji:'🐜',name:'Tiny',desc:'0.6x size, faster',color:'#22d3ee',type:'good'},speedy:{emoji:'⚡',name:'Speedy',desc:'1.4x speed',color:'#facc15',type:'good'},glowing:{emoji:'✨',name:'Glowing',desc:'Bioluminescent',color:'#4ade80',type:'good'},tough:{emoji:'💪',name:'Tough',desc:'50% fatigue resist',color:'#f97316',type:'good'},longlived:{emoji:'🕐',name:'Long-lived',desc:'1.5x lifespan',color:'#a78bfa',type:'good'},fertile:{emoji:'🥚',name:'Fertile',desc:'2x reproduction',color:'#fb7185',type:'good'},camouflage:{emoji:'👻',name:'Camouflage',desc:'Harder to catch',color:'#94a3b8',type:'good'},plated:{emoji:'🛡️',name:'Plated',desc:'Survives 1 attack',color:'#60a5fa',type:'good'},aggressive:{emoji:'😠',name:'Aggressive',desc:'Hunts cannibals',color:'#ef4444',type:'neutral'},nocturnal:{emoji:'🦉',name:'Nocturnal',desc:'Night boost',color:'#6366f1',type:'good'},rainbow:{emoji:'🌈',name:'Rainbow',desc:'Color shifts',color:'#ec4899',type:'good'},ravenous:{emoji:'🍖',name:'Ravenous',desc:'Eats fast, needs more',color:'#84cc16',type:'neutral'},zen:{emoji:'🧘',name:'Zen',desc:'+40% bravery',color:'#2dd4bf',type:'good'},magnetic:{emoji:'🧲',name:'Magnetic',desc:'+50% sociability',color:'#f472b6',type:'good'},cannibal:{emoji:'🦷',name:'Cannibal',desc:'Eats birds when <20% food',color:'#dc2626',type:'bad'},immortal:{emoji:'♾️',name:'Immortal',desc:'No age death, 3x hunger',color:'#fbbf24',type:'neutral'},bigstomach:{emoji:'🎈',name:'Big Stomach',desc:'2x food capacity',color:'#34d399',type:'good'},smallstomach:{emoji:'🫘',name:'Small Stomach',desc:'0.5x capacity, 0.66x drain',color:'#fb923c',type:'neutral'},traitor:{emoji:'💀',name:'Traitor',desc:'Becomes predator on death',color:'#7c3aed',type:'bad'},egggiver:{emoji:'🥚',name:'Egg-Giver',desc:'Dies, spawns 3 mutant babies',color:'#f0abfc',type:'special'},fat:{emoji:'🐷',name:'Fat',desc:'1.3x size, 0.7x speed',color:'#fca5a5',type:'bad'},paper:{emoji:'📄',name:'Paper',desc:'2x fatigue, very fragile',color:'#e5e7eb',type:'bad'},flightless:{emoji:'🐧',name:'Flightless',desc:'0.5x speed, no perching',color:'#6b7280',type:'bad'},mechanical:{emoji:'🤖',name:'Mechanical',desc:'1.1x speed, low fatigue/hunger',color:'#38bdf8',type:'good'},tasty:{emoji:'🍗',name:'Tasty',desc:'Predators prioritize you',color:'#f87171',type:'bad'},bullied:{emoji:'😢',name:'Bullied',desc:'-40% social, always scared',color:'#a1a1aa',type:'bad'}};
+
+function App(){
+  const canvasRef=useRef(null);
+  const stateRef=useRef({boids:[],obstacles:[],predators:[],food:[],trees:[],shelters:[],nests:[],dangerZones:[],ripples:[],bugs:[],corpses:[],pond:null,time:0,dayTime:0,seasonTime:0,cursorPos:null,nextPackId:0,width:900,height:450,spatialHash:new SpatialHash(50)});
+  const settingsRef=useRef({popCap:150,gameSpeed:1,mutationMult:1,birthMult:1,bugMult:1,predBreeding:true,cursorStrength:1,startBoids:60});
+  const animRef=useRef(null);
+  const[tool,setTool]=useState('food');const[showTrails,setShowTrails]=useState(false);const[cursorMode,setCursorMode]=useState('none');
+  const[stats,setStats]=useState({boids:0,day:true,season:'Spring',mutants:0,multiMutants:0,maxMutations:0,predators:0,bugs:0,fps:60});
+  const[mutationLog,setMutationLog]=useState([]);const[rosterData,setRosterData]=useState([]);
+  const[selectedBoid,setSelectedBoid]=useState(null);const[showMutationPanel,setShowMutationPanel]=useState(false);
+  const[favoriteBoid,setFavoriteBoid]=useState(null);const[paused,setPaused]=useState(false);
+  const[canvasSize,setCanvasSize]=useState({w:900,h:450});
+  
+  const pausedRef=useRef(false);const showTrailsRef=useRef(false);const cursorModeRef=useRef('none');const favoriteRef=useRef(null);
+  const mutationLogRef=useRef([]);const lastFrameTime=useRef(performance.now());const fpsRef=useRef(60);
+  
+  useEffect(()=>{pausedRef.current=paused},[paused]);
+  useEffect(()=>{showTrailsRef.current=showTrails},[showTrails]);
+  useEffect(()=>{cursorModeRef.current=cursorMode},[cursorMode]);
+  useEffect(()=>{favoriteRef.current=favoriteBoid},[favoriteBoid]);
+  
+  const addRipple=useCallback((x,y,color,size)=>{stateRef.current.ripples.push(new Ripple(x,y,color,size))},[]);
+  const addMutationLog=useCallback((type,event,boidSpecies,isHybrid)=>{const info=mutationInfo[type];if(!info)return;const speciesName=isHybrid?'Hybrid':(boidSpecies===0?'Cyan':'Gold');const logEntry={id:Date.now()+Math.random(),timestamp:new Date().toLocaleTimeString(),type,info,speciesName,event};mutationLogRef.current=[logEntry,...mutationLogRef.current];setMutationLog([...mutationLogRef.current])},[]);
+  const addDangerZone=useCallback((x,y)=>{const state=stateRef.current;for(const z of state.dangerZones)if(z.position.distSq(new Vector2(x,y))<1600)return;state.dangerZones.push(new DangerZone(x,y))},[]);
+  
+  const initWorld=useCallback((w,h)=>{
+    const state=stateRef.current;const settings=settingsRef.current;
+    state.width=w;state.height=h;
+    const numS0=Math.floor(settings.startBoids*0.55),numS1=settings.startBoids-numS0;
+    const s0=Array.from({length:numS0},()=>new Boid(Math.random()*w,Math.random()*(h-120),0,null,false,null,settings.mutationMult));
+    const s1=Array.from({length:numS1},()=>new Boid(Math.random()*w,Math.random()*(h-120),1,null,false,null,settings.mutationMult));
+    state.boids=[...s0,...s1];
+    for(const b of state.boids)if(Math.random()<0.3){const cands=state.boids.filter(o=>o!==b&&o.species===b.species&&!o.friend);if(cands.length>0){const f=cands[Math.floor(Math.random()*cands.length)];b.friend=f;f.friend=b;b.friendBond=0.5;f.friendBond=0.5}}
+    state.obstacles=[];state.predators=[];state.food=[];state.dangerZones=[];state.ripples=[];state.bugs=[];state.corpses=[];state.dayTime=0;state.seasonTime=0;state.nextPackId=0;
+    state.trees=[new Tree(w*0.1,h-30),new Tree(w*0.3,h-35),new Tree(w*0.5,h-30),new Tree(w*0.7,h-40),new Tree(w*0.9,h-30)];
+    state.shelters=[new Shelter(80,h-100),new Shelter(w-80,h-100)];
+    state.nests=[new Nest(w*0.22,h-130,0),new Nest(w*0.78,h-130,1)];
+    state.pond=new Pond(w*0.5,h-80,100,50);
+  },[]);
+  
+  const giveMutation=useCallback((boidId,mutationType)=>{
+    const state=stateRef.current;const boid=state.boids.find(b=>b.id===boidId);if(!boid)return;
+    boid.mutations[mutationType]=true;boid.applyMutationEffects();addMutationLog(mutationType,'given',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(255,200,0)',30);
+  },[addMutationLog,addRipple]);
+  
+  useEffect(()=>{
+    const canvas=canvasRef.current;const ctx=canvas.getContext('2d');
+    initWorld(canvas.width,canvas.height);
+    const animate=()=>{
+      const now=performance.now();const delta=now-lastFrameTime.current;lastFrameTime.current=now;
+      fpsRef.current=fpsRef.current*0.9+(1000/delta)*0.1;
+      
+      const state=stateRef.current;const settings=settingsRef.current;
+      const w=state.width,h=state.height;
+      
+      if(!pausedRef.current){
+        const spd=Math.max(1,Math.floor(settings.gameSpeed));
+        for(let tick=0;tick<spd;tick++){
+          state.time+=16;state.dayTime+=0.0015;const dayPhase=(Math.sin(state.dayTime)+1)/2;const isDay=dayPhase>0.45;state.seasonTime+=0.0002;const season=state.seasonTime%1;const seasonNames=['Spring','Summer','Fall','Winter'];const seasonIndex=Math.floor(season*4);
+          
+          // Rebuild spatial hash
+          state.spatialHash.clear();
+          for(const b of state.boids)state.spatialHash.insert(b);
+          for(const p of state.predators)state.spatialHash.insert(p);
+          
+          const baseBugRate=seasonIndex===1?0.15:seasonIndex===3?0.03:0.08;const maxBugs=Math.floor((seasonIndex===1?60:seasonIndex===3?20:40)*settings.bugMult);
+          if(Math.random()<baseBugRate*settings.bugMult&&state.bugs.length<maxBugs){const tree=state.trees[Math.floor(Math.random()*state.trees.length)];state.bugs.push(tree.spawnBug())}
+          state.bugs=state.bugs.filter(b=>b.update(w,h,state.obstacles));
+          if(state.pond)state.pond.update();
+          
+          const foodChance=seasonIndex===1?0.003:seasonIndex===3?0.0003:0.0015;
+          if(isDay&&Math.random()<foodChance&&state.food.length<5){const fx=50+Math.random()*(w-100),fy=50+Math.random()*(h-180);state.food.push(new FoodSource(fx,fy));addRipple(fx,fy,'rgb(100,255,150)',25)}
+          state.food=state.food.filter(f=>f.amount>0);state.dangerZones=state.dangerZones.filter(z=>z.update());state.ripples=state.ripples.filter(r=>r.update());state.corpses=state.corpses.filter(c=>c.update());
+          for(const s of state.shelters)s.occupants=0;
+          
+          const caughtBoids=new Set();const newPredatorsFromTraitors=[];
+          for(const pred of state.predators){const caught=pred.hunt(state.boids,state.predators,state.shelters,dayPhase,state.spatialHash);if(caught){caughtBoids.add(caught);addRipple(caught.position.x,caught.position.y,'rgb(255,100,100)',45);addDangerZone(caught.position.x,caught.position.y);state.corpses.push(new Corpse(caught.position.x,caught.position.y,caught.species));if(caught.mutations.traitor){newPredatorsFromTraitors.push(new Predator(caught.position.x,caught.position.y,state.nextPackId++,0,{...caught.mutations}));addRipple(caught.position.x,caught.position.y,'rgb(128,0,255)',50)}}}
+          for(const boid of state.boids)if(boid.armorJustBroke){boid.armorJustBroke=false;addMutationLog('plated','armor_broke',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(100,150,255)',35)}
+          state.boids=state.boids.filter(b=>!caughtBoids.has(b));state.predators.push(...newPredatorsFromTraitors);
+          
+          const newPredators=[];
+          state.predators=state.predators.filter(p=>{const alive=p.update(w,h,state.obstacles);if(!alive)addRipple(p.position.x,p.position.y,'rgb(100,100,100)',35);if(settings.predBreeding&&alive&&p.energy>130&&p.kills>=3&&Math.random()<0.01){p.energy-=50;newPredators.push(new Predator(p.position.x+(Math.random()-0.5)*30,p.position.y+(Math.random()-0.5)*30,p.packId,p.generation+1,{...p.mutations}));addRipple(p.position.x,p.position.y,'rgb(255,150,50)',40)}return alive});
+          state.predators.push(...newPredators);
+          
+          const perches=state.trees.map(t=>t.perch);
+          const cannibalVictims=new Set();
+          
+          for(const boid of state.boids){
+            // Cannibal check
+            if(boid.mutations.cannibal&&boid.energy<boid.maxEnergy*0.2){
+              const nearby=state.spatialHash.getNearby(boid.position.x,boid.position.y,1);
+              for(const other of nearby){if(other instanceof Boid&&other!==boid&&!other.isCollapsed&&boid.position.distSq(other.position)<225){boid.energy=Math.min(boid.maxEnergy,boid.energy+30);cannibalVictims.add(other);addRipple(other.position.x,other.position.y,'rgb(200,50,50)',30);break}}}
+            // Bug eating
+            for(const bug of state.bugs)if(boid.position.distSq(bug.position)<144){bug.energy=0;boid.energy=Math.min(boid.maxEnergy,boid.energy+8);boid.fatigue=Math.max(0,boid.fatigue-2)}
+            // Corpse eating
+            for(const c of state.corpses)if(boid.position.distSq(c.position)<225&&c.nutrition>0){c.nutrition-=0.5;boid.energy=Math.min(boid.maxEnergy,boid.energy+0.3)}
+            // Food attraction
+            for(const f of state.food){if(f.amount<=0||boid.isPerching||boid.isCollapsed||boid.fear>0.3)continue;const dsq=boid.position.distSq(f.position);const hm=0.5+boid.hunger;if(dsq<4900*hm*hm){if(dsq<144){f.amount-=0.4;const foodGain=boid.mutations.bigstomach?2:boid.mutations.smallstomach?0.5:1;boid.energy=Math.min(boid.maxEnergy,boid.energy+foodGain);boid.fatigue=Math.max(0,boid.fatigue-0.3)}else{const attract=f.position.sub(boid.position).normalize().mult(MAX_SPEED*0.4*hm).sub(boid.velocity).limit(MAX_FORCE);boid.acceleration=boid.acceleration.add(attract)}}}
+            const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,2).filter(b=>b instanceof Boid);
+            boid.flock(nearbyBoids,state.obstacles,state.predators,state.dangerZones,state.shelters,perches,dayPhase,state.cursorPos,cursorModeRef.current,state.pond,settings.cursorStrength)
+          }
+          state.boids=state.boids.filter(b=>!cannibalVictims.has(b));
+          
+          const newBoids=[];const eggBabies=[];
+          state.boids=state.boids.filter(boid=>{
+            const result=boid.update(w,h,dayPhase,state.shelters,state.pond,state.predators,state.obstacles);
+            if(!result.alive){
+              addRipple(boid.position.x,boid.position.y,'rgb(150,150,150)',20);
+              if(result.causeOfDeath==='drowned')addRipple(boid.position.x,boid.position.y,'rgb(50,100,200)',40);
+              state.corpses.push(new Corpse(boid.position.x,boid.position.y,boid.species));
+              if(boid.friend)boid.friend.friend=null;
+              if(boid.perchTarget){const idx=boid.perchTarget.perch.occupants.indexOf(boid);if(idx>-1)boid.perchTarget.perch.occupants.splice(idx,1)}
+              if(boid.mutations.traitor&&result.causeOfDeath!=='drowned'){state.predators.push(new Predator(boid.position.x,boid.position.y,state.nextPackId++,0,{}));addRipple(boid.position.x,boid.position.y,'rgb(128,0,255)',50)}
+              if(boid.mutations.egggiver){for(let i=0;i<3;i++){const allMuts=Object.keys(mutationInfo).filter(m=>m!=='egggiver');const randomMut=allMuts[Math.floor(Math.random()*allMuts.length)];eggBabies.push(new Boid(boid.position.x+(Math.random()-0.5)*30,boid.position.y+(Math.random()-0.5)*30,boid.species,null,false,null,1,randomMut));addMutationLog(randomMut,'egg',boid.species,false)}addRipple(boid.position.x,boid.position.y,'rgb(255,200,255)',60)}
+            }
+            if(result.alive&&state.boids.length+newBoids.length<settings.popCap){
+              const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,1).filter(b=>b instanceof Boid);
+              const reproResult=boid.canReproduce(state.nests,nearbyBoids,settings.birthMult);
+              if(reproResult.can){
+                boid.energy-=35;boid.matingDisplay=1;if(reproResult.mate){reproResult.mate.energy-=25;reproResult.mate.matingDisplay=0.8}
+                let babySpecies,isHybrid=false;if(reproResult.isCrossBreed){isHybrid=true;babySpecies=Math.random()>0.5?boid.species:reproResult.mate.species}else babySpecies=boid.species;
+                const combinedTraits=reproResult.mate?{bravery:(boid.bravery+reproResult.mate.bravery)/2,hunger:(boid.hunger+reproResult.mate.hunger)/2,laziness:(boid.laziness+reproResult.mate.laziness)/2,sociability:(boid.sociability+reproResult.mate.sociability)/2}:{bravery:boid.bravery,hunger:boid.hunger,laziness:boid.laziness,sociability:boid.sociability};
+                const parentMutations={parent1Muts:boid.mutations||{},parent2Muts:reproResult.mate?(reproResult.mate.mutations||{}):{}};
+                const baby=new Boid(boid.position.x+(Math.random()-0.5)*20,boid.position.y+(Math.random()-0.5)*20,babySpecies,combinedTraits,isHybrid,parentMutations,settings.mutationMult);
+                for(const mutType of baby.getMutationList()){const p1Has=parentMutations.parent1Muts[mutType],p2Has=parentMutations.parent2Muts[mutType];if(p1Has&&p2Has)addMutationLog(mutType,'both',babySpecies,isHybrid);else if(p1Has||p2Has)addMutationLog(mutType,'inherited',babySpecies,isHybrid);else addMutationLog(mutType,'new',babySpecies,isHybrid)}
+                newBoids.push(baby);
+                let rippleColor;if(baby.getMutationCount()>0)rippleColor='rgb(255,100,255)';else if(isHybrid)rippleColor='rgb(150,255,150)';else rippleColor=`rgb(${boid.species===0?'100,200,255':'255,200,100'})`;
+                addRipple(boid.position.x,boid.position.y,rippleColor,isHybrid||baby.getMutationCount()>0?40:30);
+              }
+            }
+            return result.alive;
+          });
+          state.boids.push(...newBoids,...eggBabies);
+          
+          // Friendship forming
+          if(state.time%1000<20){for(const boid of state.boids)if(!boid.friend&&boid.sociability>0.5){const cands=state.spatialHash.getNearby(boid.position.x,boid.position.y,1).filter(b=>b instanceof Boid&&b!==boid&&b.species===boid.species&&!b.friend);if(cands.length>0){const f=cands[0];boid.friend=f;f.friend=boid;boid.friendBond=0.3;f.friendBond=0.3;break}}}
+          
+          // Stats update (throttled)
+          if(state.time%500<20){
+            let mutants=0,multiMutants=0,maxMutations=0;const rosterArr=[];
+            for(const b of state.boids){const count=b.getMutationCount();if(count>0){mutants++;rosterArr.push({id:b.id,species:b.species,isHybrid:b.isHybrid,energy:b.energy,maxEnergy:b.maxEnergy,age:b.age,maxAge:b.maxAge,hasArmor:b.hasArmor,mutations:b.getMutationList(),isFishing:b.isFishing})}if(count>1)multiMutants++;if(count>maxMutations)maxMutations=count}
+            rosterArr.sort((a,b)=>b.mutations.length-a.mutations.length);
+            setStats({boids:state.boids.length,day:isDay,season:seasonNames[seasonIndex],mutants,multiMutants,maxMutations,predators:state.predators.length,bugs:state.bugs.length,fps:Math.round(fpsRef.current)});
+            setRosterData(rosterArr);
+          }
+        }
+      }
+      
+      // Render
+      const dayPhase=(Math.sin(state.dayTime)+1)/2;const season=state.seasonTime%1;
+      ctx.fillStyle=`rgba(${12+dayPhase*12},${12+dayPhase*18},${22+dayPhase*25},0.25)`;ctx.fillRect(0,0,w,h);
+      for(const z of state.dangerZones)z.draw(ctx);for(const c of state.corpses)c.draw(ctx);
+      if(state.pond)state.pond.draw(ctx,state.time);
+      for(const f of state.food)f.draw(ctx,state.time,season);for(const b of state.bugs)b.draw(ctx);for(const s of state.shelters)s.draw(ctx,dayPhase);for(const n of state.nests)n.draw(ctx);
+      for(const t of state.trees)t.draw(ctx,dayPhase);
+      for(const o of state.obstacles){ctx.fillStyle='rgba(80,70,60,0.9)';ctx.beginPath();ctx.arc(o.x,o.y,14,0,Math.PI*2);ctx.fill()}
+      for(const p of state.predators)p.draw(ctx,state.time,dayPhase);
+      for(const b of state.boids)b.draw(ctx,showTrailsRef.current,dayPhase,w,b.id===favoriteRef.current);
+      for(const r of state.ripples)r.draw(ctx);
+      if(state.cursorPos&&cursorModeRef.current!=='none'){ctx.strokeStyle=cursorModeRef.current==='attract'?'rgba(100,255,150,0.4)':'rgba(255,100,100,0.4)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(state.cursorPos.x,state.cursorPos.y,100*settingsRef.current.cursorStrength,0,Math.PI*2);ctx.stroke()}
+      if(pausedRef.current){ctx.fillStyle='rgba(0,0,0,0.3)';ctx.fillRect(0,0,w,h);ctx.fillStyle='white';ctx.font='48px sans-serif';ctx.textAlign='center';ctx.fillText('PAUSED',w/2,h/2)}
+      
+      animRef.current=requestAnimationFrame(animate)
+    };
+    ctx.fillStyle='rgb(12,12,22)';ctx.fillRect(0,0,canvas.width,canvas.height);animate();
+    return()=>{if(animRef.current)cancelAnimationFrame(animRef.current)}
+  },[initWorld,addRipple,addDangerZone,addMutationLog]);
+  
+  const handleClick=e=>{const rect=canvasRef.current.getBoundingClientRect();const x=(e.clientX-rect.left)*(canvasRef.current.width/rect.width),y=(e.clientY-rect.top)*(canvasRef.current.height/rect.height);const state=stateRef.current;
+    if(tool==='select'){const clicked=state.boids.find(b=>b.position.distSq(new Vector2(x,y))<225);if(clicked){setSelectedBoid(clicked.id);setShowMutationPanel(true)}return}
+    if(tool==='favorite'){const clicked=state.boids.find(b=>b.position.distSq(new Vector2(x,y))<225);if(clicked)setFavoriteBoid(f=>f===clicked.id?null:clicked.id);return}
+    switch(tool){
+      case'obstacle':state.obstacles.push(new Vector2(x,y));break;
+      case'predator':const np=state.predators.find(p=>p.position.distSq(new Vector2(x,y))<6400);state.predators.push(new Predator(x,y,np?.packId??state.nextPackId++));addRipple(x,y,'rgb(255,50,50)',35);break;
+      case'food':state.food.push(new FoodSource(x,y));addRipple(x,y,'rgb(100,255,150)',25);break;
+      case'shelter':state.shelters.push(new Shelter(x,y));break;
+      case'nest':state.nests.push(new Nest(x,y,Math.random()>0.5?0:1));break;
+      case'boid':const sp=Math.random()>0.5?0:1;for(let i=0;i<8;i++)state.boids.push(new Boid(x+(Math.random()-0.5)*40,y+(Math.random()-0.5)*40,sp,null,false,null,settingsRef.current.mutationMult));addRipple(x,y,'rgb(150,200,255)',40);break;
+    }
+  };
+  
+  const resizeCanvas=(newW,newH)=>{setCanvasSize({w:newW,h:newH});stateRef.current.width=newW;stateRef.current.height=newH;setTimeout(()=>initWorld(newW,newH),50)};
+  
+  const tools=[{id:'food',label:'🌿'},{id:'obstacle',label:'🪨'},{id:'predator',label:'👁'},{id:'shelter',label:'🏠'},{id:'nest',label:'🪺'},{id:'boid',label:'🐦'},{id:'select',label:'👆'},{id:'favorite',label:'⭐'}];
+  
+  return(
+    <div className="flex flex-col items-center gap-1 p-2 bg-gray-900 min-h-screen">
+      <div className="flex items-center gap-3 flex-wrap justify-center">
+        <h1 className="text-base font-bold text-cyan-400">Living World</h1>
+        <span className="text-gray-500 text-xs">{stats.day?'☀️':'🌙'} {stats.season} • {stats.boids} boids • {stats.predators} pred • {stats.bugs} bugs • {stats.fps}fps</span>
+        {stats.mutants>0&&<span className="text-purple-400 text-xs">🧬 {stats.mutants}{stats.multiMutants>0&&<span className="text-pink-400"> ({stats.multiMutants})</span>}</span>}
+      </div>
+      
+      <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h} onClick={handleClick} onMouseMove={e=>{const rect=canvasRef.current.getBoundingClientRect();stateRef.current.cursorPos=new Vector2((e.clientX-rect.left)*(canvasRef.current.width/rect.width),(e.clientY-rect.top)*(canvasRef.current.height/rect.height))}} onMouseLeave={()=>stateRef.current.cursorPos=null} className="border border-gray-700 rounded cursor-crosshair"/>
+      
+      <div className="flex flex-wrap justify-center items-center gap-1">
+        <button onClick={()=>setPaused(p=>!p)} className={`px-2 py-0.5 rounded text-xs font-bold ${paused?'bg-green-600':'bg-yellow-600'}`}>{paused?'▶':'⏸'}</button>
+        {tools.map(t=><button key={t.id} onClick={()=>setTool(t.id)} className={`w-7 h-7 rounded text-sm ${tool===t.id?'bg-cyan-600':'bg-gray-700 hover:bg-gray-600'}`} title={t.id}>{t.label}</button>)}
+        <span className="mx-1 text-gray-600">|</span>
+        {['none','attract','repel'].map(m=><button key={m} onClick={()=>setCursorMode(m)} className={`px-2 py-0.5 rounded text-xs ${cursorMode===m?m==='attract'?'bg-green-600':m==='repel'?'bg-red-600':'bg-gray-600':'bg-gray-700'}`}>{m==='none'?'—':m==='attract'?'🧲':'💨'}</button>)}
+        <span className="mx-1 text-gray-600">|</span>
+        <button onClick={()=>setShowTrails(t=>!t)} className={`px-2 py-0.5 rounded text-xs ${showTrails?'bg-purple-600':'bg-gray-700'}`}>✨</button>
+        <button onClick={()=>{mutationLogRef.current=[];setMutationLog([]);setFavoriteBoid(null);initWorld(canvasSize.w,canvasSize.h)}} className="px-2 py-0.5 bg-gray-700 rounded text-xs">🔄</button>
+      </div>
+      
+      <div className="w-full max-w-5xl mt-1 p-2 bg-gray-800 rounded border border-gray-700">
+        <div className="flex flex-wrap gap-4 justify-center items-center text-xs">
+          <label className="flex items-center gap-1"><span className="text-gray-400">Pop Cap</span><input type="number" defaultValue={150} onBlur={e=>{settingsRef.current.popCap=Math.max(10,Math.min(1000,parseInt(e.target.value)||150))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Speed</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.gameSpeed=Math.max(0.5,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Mut×</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.mutationMult=Math.max(0,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Birth×</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.birthMult=Math.max(0,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Bug×</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.bugMult=Math.max(0,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Start</span><input type="number" defaultValue={60} onBlur={e=>{settingsRef.current.startBoids=Math.max(10,Math.min(500,parseInt(e.target.value)||60))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Vortex</span><input type="range" min="0.1" max="3" step="0.1" defaultValue="1" onChange={e=>{settingsRef.current.cursorStrength=parseFloat(e.target.value)}} className="w-16"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Pred</span><button onClick={()=>{settingsRef.current.predBreeding=!settingsRef.current.predBreeding;}} className="px-2 py-0.5 rounded bg-gray-600 hover:bg-gray-500">{settingsRef.current.predBreeding?'ON':'OFF'}</button></label>
+          <div className="flex items-center gap-1"><span className="text-gray-400">Size</span><button onClick={()=>resizeCanvas(900,450)} className={`px-1 py-0.5 rounded ${canvasSize.w===900?'bg-cyan-600':'bg-gray-700'}`}>M</button><button onClick={()=>resizeCanvas(1200,550)} className={`px-1 py-0.5 rounded ${canvasSize.w===1200?'bg-cyan-600':'bg-gray-700'}`}>L</button><button onClick={()=>resizeCanvas(1400,650)} className={`px-1 py-0.5 rounded ${canvasSize.w===1400?'bg-cyan-600':'bg-gray-700'}`}>XL</button></div>
+        </div>
+      </div>
+      
+      {showMutationPanel&&selectedBoid&&(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={()=>setShowMutationPanel(false)}>
+          <div className="bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-2xl max-h-96 overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-3"><h3 className="text-cyan-400 font-bold">Give Mutation</h3><button onClick={()=>setShowMutationPanel(false)} className="text-gray-400 hover:text-white">✕</button></div>
+            <div className="grid grid-cols-4 gap-2">
+              {Object.entries(mutationInfo).map(([key,info])=>(
+                <button key={key} onClick={()=>{giveMutation(selectedBoid,key);setShowMutationPanel(false)}} className={`p-2 rounded text-xs text-left hover:bg-gray-700 ${info.type==='good'?'bg-green-900/30':info.type==='bad'?'bg-red-900/30':info.type==='special'?'bg-purple-900/30':'bg-gray-700/50'}`}>
+                  <div className="flex items-center gap-1"><span>{info.emoji}</span><span style={{color:info.color}}>{info.name}</span></div>
+                  <div className="text-gray-500 text-xs mt-1">{info.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <div className="w-full max-w-5xl mt-1 flex gap-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1"><span className="text-pink-400 text-sm font-bold">🧬 Roster</span><span className="text-gray-600 text-xs">({rosterData.length})</span></div>
+          <div className="bg-gray-800 rounded border border-gray-700 h-40 overflow-y-auto scroll-stable">
+            {rosterData.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">No mutants</div>:
+            <div className="p-2 space-y-1">{rosterData.map(boid=>{
+              const speciesColor=boid.isHybrid?'text-green-400':boid.species===0?'text-cyan-400':'text-yellow-400';
+              const isFav=boid.id===favoriteBoid;
+              return<div key={boid.id} className={`p-1 rounded bg-gray-900/50 border-l-2 ${isFav?'border-yellow-400':'border-purple-500'} cursor-pointer hover:bg-gray-800`} onClick={()=>{setSelectedBoid(boid.id);setShowMutationPanel(true)}}>
+                <div className="flex items-center gap-1 flex-wrap text-xs"><span className={speciesColor}>{boid.isHybrid?'H':boid.species===0?'C':'G'}</span><span className="text-gray-500">{boid.mutations.length}m</span><span className="text-gray-600">❤️{Math.round(boid.energy)}</span>{isFav&&<span>⭐</span>}</div>
+                <div className="flex flex-wrap gap-0.5 mt-0.5">{boid.mutations.slice(0,4).map(mut=>{const info=mutationInfo[mut];return info?<span key={mut} className="text-xs" style={{color:info.color}}>{info.emoji}</span>:null})}{boid.mutations.length>4&&<span className="text-gray-500 text-xs">+{boid.mutations.length-4}</span>}</div>
+              </div>})}</div>}
+          </div>
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1"><span className="text-purple-400 text-sm font-bold">📜 Log</span><span className="text-gray-600 text-xs">({mutationLog.length})</span></div>
+          <div className="bg-gray-800 rounded border border-gray-700 h-40 overflow-y-auto scroll-stable">
+            {mutationLog.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">Waiting</div>:
+            <div className="p-2 space-y-1">{mutationLog.map(entry=><div key={entry.id} className="flex items-center gap-1 p-0.5 text-xs">
+              <span>{entry.info.emoji}</span><span style={{color:entry.info.color}}>{entry.info.name}</span>
+              <span className={`px-1 rounded ${entry.event==='new'?'bg-yellow-500/20 text-yellow-400':entry.event==='given'?'bg-orange-500/20 text-orange-400':'bg-purple-500/20 text-purple-400'}`}>{entry.event==='new'?'NEW':entry.event==='given'?'⚡':entry.event==='egg'?'🥚':'INH'}</span>
+            </div>)}</div>}
+          </div>
+        </div>
+      </div>
+      
+      <div className="w-full max-w-5xl mt-1 p-1 bg-gray-800/50 rounded border border-gray-700">
+        <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).map(([key,info])=><span key={key} className="text-xs" style={{color:info.color}} title={info.desc}>{info.emoji}</span>)}</div>
+      </div>
+    </div>
+  )
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
