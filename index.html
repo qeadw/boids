@@ -428,6 +428,7 @@ function App(){
   const[predatorRoster,setPredatorRoster]=useState([]);const[showDNALab,setShowDNALab]=useState(false);
   const[vortexBoids,setVortexBoids]=useState(true);const[vortexPredators,setVortexPredators]=useState(false);
   const[showRoster,setShowRoster]=useState(true);const[showLog,setShowLog]=useState(true);
+  const[expandRoster,setExpandRoster]=useState(false);const[expandLog,setExpandLog]=useState(false);
   
   const pausedRef=useRef(false);const showTrailsRef=useRef(false);const cursorModeRef=useRef('none');const favoriteRef=useRef(null);
   const mutationLogRef=useRef([]);const lastFrameTime=useRef(performance.now());const fpsRef=useRef(60);
@@ -746,8 +747,8 @@ function App(){
       
       <div className="w-full max-w-5xl mt-1 flex gap-2">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1 cursor-pointer" onClick={()=>setShowRoster(r=>!r)}><button className="text-gray-500 hover:text-white text-xs">{showRoster?'▼':'▶'}</button><span className="text-pink-400 text-sm font-bold">🧬 Mutant Roster</span><span className="text-gray-600 text-xs">({rosterData.length} mutants)</span></div>
-          {showRoster&&<div className="bg-gray-800 rounded border border-gray-700 h-36 overflow-y-auto scroll-stable">
+          <div className="flex items-center gap-2 mb-1"><button className="text-gray-500 hover:text-white text-xs" onClick={()=>setShowRoster(r=>!r)}>{showRoster?'▼':'▶'}</button><span className="text-pink-400 text-sm font-bold cursor-pointer" onClick={()=>setShowRoster(r=>!r)}>🧬 Mutant Roster</span><span className="text-gray-600 text-xs">({rosterData.length})</span>{showRoster&&<button className="text-gray-500 hover:text-white text-xs ml-auto" onClick={()=>setExpandRoster(e=>!e)}>{expandRoster?'▫':'▪'}</button>}</div>
+          {showRoster&&<div className={`bg-gray-800 rounded border border-gray-700 overflow-y-auto scroll-stable ${expandRoster?'h-72':'h-36'}`}>
             {rosterData.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">No mutants yet</div>:
             <div className="p-1.5 space-y-1">{rosterData.map(boid=>{
               const speciesName=boid.isHybrid?'Hybrid':boid.species===0?'Cyan':'Gold';
@@ -769,8 +770,8 @@ function App(){
           </div>}
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1 cursor-pointer" onClick={()=>setShowLog(l=>!l)}><button className="text-gray-500 hover:text-white text-xs">{showLog?'▼':'▶'}</button><span className="text-purple-400 text-sm font-bold">📜 Mutation Log</span><span className="text-gray-600 text-xs">({mutationLog.length} events)</span></div>
-          {showLog&&<div className="bg-gray-800 rounded border border-gray-700 h-36 overflow-y-auto scroll-stable">
+          <div className="flex items-center gap-2 mb-1"><button className="text-gray-500 hover:text-white text-xs" onClick={()=>setShowLog(l=>!l)}>{showLog?'▼':'▶'}</button><span className="text-purple-400 text-sm font-bold cursor-pointer" onClick={()=>setShowLog(l=>!l)}>📜 Mutation Log</span><span className="text-gray-600 text-xs">({mutationLog.length})</span>{showLog&&<button className="text-gray-500 hover:text-white text-xs ml-auto" onClick={()=>setExpandLog(e=>!e)}>{expandLog?'▫':'▪'}</button>}</div>
+          {showLog&&<div className={`bg-gray-800 rounded border border-gray-700 overflow-y-auto scroll-stable ${expandLog?'h-72':'h-36'}`}>
             {mutationLog.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">Waiting for mutations...</div>:
             <div className="p-2 space-y-1.5">{mutationLog.map(entry=>{
               const eventLabel=entry.event==='new'?'New Mutation':entry.event==='given'?'Given':entry.event==='given_pred'?'Given Pred':entry.event==='egg'?'Egg Birth':entry.event==='inherited'?'Inherited':entry.event==='both'?'Both Parents':entry.event==='armor_broke'?'Armor Broke':entry.event==='evolved'?'Evolved':entry.event==='killed_pred'?'⚔️ KILLED PRED':'Event';
