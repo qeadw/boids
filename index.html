@@ -214,7 +214,7 @@ class Boid{
     this.mutations={};
     if(parentMutations){const{parent1Muts,parent2Muts}=parentMutations;const all=new Set([...Object.keys(parent1Muts||{}),...Object.keys(parent2Muts||{})]);for(const m of all){if(m==='egggiver')continue;const p1=parent1Muts&&parent1Muts[m],p2=parent2Muts&&parent2Muts[m];if(p1&&p2)this.mutations[m]=true;else if((p1||p2)&&Math.random()<0.5)this.mutations[m]=true}}
     if(forceMutation)this.mutations[forceMutation]=true;
-    else if(Math.random()<0.03*mutMult){const possible=Object.keys(mutationInfo).filter(m=>m!=='egggiver'&&m!=='phoenix'&&m!=='mimic'&&m!=='fighter');const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true;else if(Math.random()<0.2&&!this.mutations.fighter)this.mutations.fighter=true}
+    else if(Math.random()<0.03*mutMult){const possible=Object.keys(mutationInfo).filter(m=>m!=='egggiver'&&m!=='phoenix'&&m!=='mimic'&&m!=='fighter'&&!disabledMutations[m]);const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true;else if(Math.random()<0.2&&!this.mutations.fighter&&!disabledMutations.fighter)this.mutations.fighter=true}
     this.hasPhoenix=!!this.mutations.phoenix;this.nearDeathCount=0
     this.applyMutationEffects()
   }
@@ -363,6 +363,8 @@ const mutationMultipliers={
   bigstomach:{capacity:2,foodgain:2},smallstomach:{capacity:0.5,drain:0.66},immortal:{drain:3},
   fertile:{reproduce:2},fighter:{fightChance:0.5,killChance:0.4},fluffy:{drain:0.7},berserker:{speed:1.4}
 };
+
+const disabledMutations={};
 
 const mutationInfo={
   // Good mutations
@@ -657,13 +659,20 @@ function App(){
   const resizeCanvas=(newW,newH)=>{
     setCanvasSize({w:newW,h:newH});
     const state=stateRef.current;
+    const scaleX=newW/state.width,scaleY=newH/state.height;
+    // Scale all entity positions proportionally
+    for(const b of state.boids){b.position.x*=scaleX;b.position.y*=scaleY}
+    for(const p of state.predators){p.position.x*=scaleX;p.position.y*=scaleY}
+    for(const bug of state.bugs){bug.position.x*=scaleX;bug.position.y*=scaleY}
+    for(const o of state.obstacles){o.x*=scaleX;o.y*=scaleY}
+    for(const f of state.food){f.position.x*=scaleX;f.position.y*=scaleY}
+    for(const t of state.trees){t.position.x*=scaleX;t.position.y*=scaleY;t.perch.position.x*=scaleX;t.perch.position.y*=scaleY}
+    for(const s of state.shelters){s.position.x*=scaleX;s.position.y*=scaleY}
+    for(const n of state.nests){n.position.x*=scaleX;n.position.y*=scaleY}
+    if(state.pond){state.pond.position.x*=scaleX;state.pond.position.y*=scaleY}
+    for(const c of state.corpses){c.position.x*=scaleX;c.position.y*=scaleY}
+    for(const d of state.dangerZones){d.position.x*=scaleX;d.position.y*=scaleY}
     state.width=newW;state.height=newH;
-    // Clamp all entities to new boundaries
-    for(const b of state.boids){b.position.x=Math.min(b.position.x,newW);b.position.y=Math.min(b.position.y,newH)}
-    for(const p of state.predators){p.position.x=Math.min(p.position.x,newW);p.position.y=Math.min(p.position.y,newH)}
-    for(const bug of state.bugs){bug.position.x=Math.min(bug.position.x,newW);bug.position.y=Math.min(bug.position.y,newH)}
-    state.obstacles=state.obstacles.filter(o=>o.x<=newW&&o.y<=newH);
-    state.food=state.food.filter(f=>f.position.x<=newW&&f.position.y<=newH);
   };
   
   const tools=[{id:'food',label:'🌿'},{id:'obstacle',label:'🪨'},{id:'remove',label:'❌'},{id:'predator',label:'👁'},{id:'shelter',label:'🏠'},{id:'nest',label:'🪺'},{id:'boid',label:'🐦'},{id:'select',label:'👆'},{id:'favorite',label:'⭐'}];
@@ -804,6 +813,21 @@ function App(){
                 <button onClick={()=>{stateRef.current.boids.forEach(b=>{b.mutations.fighter=true;b.applyMutationEffects()})}} className="px-3 py-1.5 bg-red-700 hover:bg-red-600 rounded text-sm">⚔️ Give All Fighter</button>
               </div>
             </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h4 className="text-yellow-400 font-bold mb-2">🔒 Natural Mutation Spawning (uncheck to disable)</h4>
+              <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                {Object.entries(mutationInfo).filter(([k])=>!['egggiver','phoenix','mimic'].includes(k)).map(([key,info])=>(
+                  <label key={key} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs cursor-pointer ${disabledMutations[key]?'opacity-40':''}`} style={{backgroundColor:info.color+'15',border:`1px solid ${info.color}33`}}>
+                    <input type="checkbox" checked={!disabledMutations[key]} onChange={e=>{if(e.target.checked)delete disabledMutations[key];else disabledMutations[key]=true;setShowDNALab(s=>s)}} className="w-3 h-3"/>
+                    <span style={{color:info.color}}>{info.emoji} {info.name}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button onClick={()=>{Object.keys(mutationInfo).forEach(k=>delete disabledMutations[k]);setShowDNALab(s=>s)}} className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-xs">Enable All</button>
+                <button onClick={()=>{Object.keys(mutationInfo).filter(k=>!['egggiver','phoenix','mimic'].includes(k)).forEach(k=>disabledMutations[k]=true);setShowDNALab(s=>s)}} className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs">Disable All</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -873,7 +897,7 @@ function App(){
       )}
       
       <div className="w-full max-w-5xl mt-1 p-1 bg-gray-800/50 rounded border border-gray-700 cursor-pointer" onClick={()=>setExpandLegend(e=>!e)}>
-        <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).map(([key,info])=>expandLegend?<span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'15',color:info.color,border:`1px solid ${info.color}33`}} title={info.desc}><span>{info.emoji}</span><span>{info.name}</span></span>:<span key={key} className="text-sm" style={{color:info.color}} title={`${info.name}: ${info.desc}`}>{info.emoji}</span>)}</div>
+        <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).filter(([,info])=>info.type!=='hidden').map(([key,info])=>expandLegend?<span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'15',color:info.color,border:`1px solid ${info.color}33`}} title={info.desc}><span>{info.emoji}</span><span>{info.name}</span></span>:<span key={key} className="text-sm" style={{color:info.color}} title={`${info.name}: ${info.desc}`}>{info.emoji}</span>)}</div>
       </div>
     </div>
   )
