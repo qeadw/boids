@@ -25,18 +25,34 @@ class SpatialHash{
   getNearby(x,y,radius=1){const results=[];const cx=Math.floor(x/this.cellSize),cy=Math.floor(y/this.cellSize);for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++){const key=`${cx+dx},${cy+dy}`;if(this.cells.has(key))results.push(...this.cells.get(key))}return results}
 }
 
+// Vector2 object pool to reduce GC pressure
+const vecPool=[];const POOL_SIZE=200;for(let i=0;i<POOL_SIZE;i++)vecPool.push({x:0,y:0,inUse:false});
+let poolIndex=0;
+function getVec(x=0,y=0){const v=vecPool[poolIndex];poolIndex=(poolIndex+1)%POOL_SIZE;v.x=x;v.y=y;return v}
+
 class Vector2{
   constructor(x=0,y=0){this.x=x;this.y=y}
+  // Immutable methods (return new Vector2)
   add(v){return new Vector2(this.x+v.x,this.y+v.y)}
   sub(v){return new Vector2(this.x-v.x,this.y-v.y)}
   mult(n){return new Vector2(this.x*n,this.y*n)}
   div(n){return n===0?new Vector2():new Vector2(this.x/n,this.y/n)}
-  mag(){return Math.sqrt(this.x*this.x+this.y*this.y)}
-  magSq(){return this.x*this.x+this.y*this.y}
   normalize(){const m=this.mag();return m===0?new Vector2():this.div(m)}
   limit(max){const msq=this.magSq();return msq>max*max?this.normalize().mult(max):this.copy()}
   copy(){return new Vector2(this.x,this.y)}
-  dist(v){return this.sub(v).mag()}
+  // Mutable methods (modify in place, return this for chaining)
+  set(x,y){this.x=x;this.y=y;return this}
+  addM(v){this.x+=v.x;this.y+=v.y;return this}
+  subM(v){this.x-=v.x;this.y-=v.y;return this}
+  multM(n){this.x*=n;this.y*=n;return this}
+  divM(n){if(n!==0){this.x/=n;this.y/=n}return this}
+  normalizeM(){const m=this.mag();if(m>0){this.x/=m;this.y/=m}return this}
+  limitM(max){const msq=this.magSq();if(msq>max*max){const m=Math.sqrt(msq);this.x=this.x/m*max;this.y=this.y/m*max}return this}
+  zero(){this.x=0;this.y=0;return this}
+  // Non-allocating calculations
+  mag(){return Math.sqrt(this.x*this.x+this.y*this.y)}
+  magSq(){return this.x*this.x+this.y*this.y}
+  dist(v){const dx=this.x-v.x,dy=this.y-v.y;return Math.sqrt(dx*dx+dy*dy)}
   distSq(v){const dx=this.x-v.x,dy=this.y-v.y;return dx*dx+dy*dy}
   static fromAngle(a,m=1){return new Vector2(Math.cos(a)*m,Math.sin(a)*m)}
 }
@@ -114,22 +130,30 @@ class Predator{
     const agg=1+(1-dayPhase)*0.5;this.maxSpeed=this.baseSpeed+(1-dayPhase)*2;
     const pack=predators.filter(p=>p.packId===this.packId);const leader=pack.find(p=>p.isLeader)||pack[0];if(leader)leader.isLeader=true;
     let target=null,targetDist=Infinity;
-    const nearby=spatialHash.getNearby(this.position.x,this.position.y,3);
-    for(const boid of nearby){
+    const px=this.position.x,py=this.position.y;
+    const nearby=spatialHash.getNearby(px,py,3);
+    const maxDistSq=22500*agg*agg;
+    for(let i=0;i<nearby.length;i++){
+      const boid=nearby[i];
       if(!(boid instanceof Boid))continue;
-      let inShelter=false;for(const s of shelters)if(s.contains(boid.position)){inShelter=true;break}
+      const bx=boid.position.x,by=boid.position.y;
+      let inShelter=false;for(let j=0;j<shelters.length;j++){const s=shelters[j];const dx=s.position.x-bx,dy=s.position.y-by;if(dx*dx+dy*dy<s.radius*s.radius){inShelter=true;break}}
       if(inShelter)continue;
-      const d=this.position.distSq(boid.position);
+      const dx=px-bx,dy=py-by,d=dx*dx+dy*dy;
       let priority=d;if(boid.mutations.tasty)priority*=0.25;if(boid.isCollapsed)priority*=0.09;priority*=(1-boid.energy/100)*0.5+0.5;
-      if(d<22500*agg*agg&&priority<targetDist){targetDist=priority;target=boid}
+      if(d<maxDistSq&&priority<targetDist){targetDist=priority;target=boid}
     }
     this.targetBoid=target;
-    let steering=new Vector2();
     if(target){
-      const pred=target.position.add(target.velocity.mult(8));
-      steering=pred.sub(this.position).normalize().mult(this.maxSpeed).sub(this.velocity).limit(this.maxForce*agg);
+      const tx=target.position.x+target.velocity.x*8,ty=target.position.y+target.velocity.y*8;
+      let sx=tx-px,sy=ty-py,sm=Math.sqrt(sx*sx+sy*sy);
+      if(sm>0){sx/=sm;sy/=sm}
+      sx=sx*this.maxSpeed-this.velocity.x;sy=sy*this.maxSpeed-this.velocity.y;
+      sm=Math.sqrt(sx*sx+sy*sy);const sl=this.maxForce*agg;if(sm>sl){sx=sx/sm*sl;sy=sy/sm*sl}
+      this.acceleration.x+=sx;this.acceleration.y+=sy;
       const catchD=target.mutations.camouflage?8:target.mutations.fat?15:12;
-      const actualDist=Math.sqrt(this.position.distSq(target.position));
+      const tdx=px-target.position.x,tdy=py-target.position.y;
+      const actualDist=Math.sqrt(tdx*tdx+tdy*tdy);
       if(actualDist<catchD){
         if(target.mutations.plated&&target.hasArmor){target.hasArmor=false;target.mutations.plated=false;target.fear=1;target.armorJustBroke=true;this.energy=Math.min(150,this.energy+10);return null}
         if(target.mutations.paper||Math.random()>0.1||target.mutations.tasty){
@@ -139,12 +163,13 @@ class Predator{
         }
       }
     }
-    this.acceleration=this.acceleration.add(steering);return null
+    return null
   }
   update(w,h,obstacles){
     this.energy-=0.04;
-    for(const o of obstacles){const d=this.position.distSq(o);if(d<30*30){const away=this.position.sub(o).normalize().mult(MAX_FORCE*3);this.acceleration=this.acceleration.add(away)}}
-    this.velocity=this.velocity.add(this.acceleration).limit(this.maxSpeed);this.position=this.position.add(this.velocity);this.acceleration=new Vector2();this.edges(w,h);return this.energy>0
+    const px=this.position.x,py=this.position.y;
+    for(let i=0;i<obstacles.length;i++){const o=obstacles[i];const dx=px-o.x,dy=py-o.y,dsq=dx*dx+dy*dy;if(dsq<900){const m=Math.sqrt(dsq);if(m>0){this.acceleration.x+=dx/m*MAX_FORCE*3;this.acceleration.y+=dy/m*MAX_FORCE*3}}}
+    this.velocity.addM(this.acceleration).limitM(this.maxSpeed);this.position.addM(this.velocity);this.acceleration.zero();this.edges(w,h);return this.energy>0
   }
   draw(ctx,time,dayPhase){const angle=Math.atan2(this.velocity.y,this.velocity.x);const size=12+this.generation*2;ctx.save();ctx.translate(this.position.x,this.position.y);ctx.rotate(angle);const ng=1-dayPhase;const g=ctx.createRadialGradient(0,0,0,0,0,25+ng*15);g.addColorStop(0,`rgba(255,50,50,${0.3+ng*0.3})`);g.addColorStop(1,'rgba(255,50,50,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,25+ng*15,0,Math.PI*2);ctx.fill();if(this.isLeader){ctx.fillStyle='rgba(255,215,0,0.9)';ctx.beginPath();ctx.moveTo(-6,-size*0.8);ctx.lineTo(-3,-size*0.5);ctx.lineTo(0,-size*0.8);ctx.lineTo(3,-size*0.5);ctx.lineTo(6,-size*0.8);ctx.lineTo(4,-size*0.4);ctx.lineTo(-4,-size*0.4);ctx.fill()}ctx.fillStyle=`hsl(0,80%,${35+this.energy*0.15}%)`;ctx.beginPath();ctx.moveTo(size,0);ctx.lineTo(-size*0.5,-size*0.6);ctx.lineTo(-size*0.3,0);ctx.lineTo(-size*0.5,size*0.6);ctx.closePath();ctx.fill();if(Object.keys(this.mutations).length>0){ctx.strokeStyle='rgba(255,200,0,0.5)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,size+4,0,Math.PI*2);ctx.stroke()}ctx.restore()}
 }
@@ -181,84 +206,89 @@ class Boid{
   getMutationCount(){return Object.keys(this.mutations).length}
   getMutationList(){return Object.keys(this.mutations)}
   edges(w,h,predators){
-    const margin=30;let dominated=false;
-    for(const p of predators){if(p.targetBoid===this&&this.position.distSq(p.position)<10000){dominated=true;break}}
+    const margin=30,px=this.position.x,py=this.position.y;let dominated=false;
+    for(let i=0;i<predators.length;i++){const p=predators[i];if(p.targetBoid===this){const dx=px-p.position.x,dy=py-p.position.y;if(dx*dx+dy*dy<10000){dominated=true;break}}}
     if(dominated){
-      if(this.position.x<margin)this.acceleration=this.acceleration.add(new Vector2(MAX_FORCE*3,0));
-      if(this.position.x>w-margin)this.acceleration=this.acceleration.add(new Vector2(-MAX_FORCE*3,0));
-      if(this.position.y<margin)this.acceleration=this.acceleration.add(new Vector2(0,MAX_FORCE*3));
-      if(this.position.y>h-margin)this.acceleration=this.acceleration.add(new Vector2(0,-MAX_FORCE*3));
+      if(px<margin)this.acceleration.x+=MAX_FORCE*3;
+      if(px>w-margin)this.acceleration.x-=MAX_FORCE*3;
+      if(py<margin)this.acceleration.y+=MAX_FORCE*3;
+      if(py>h-margin)this.acceleration.y-=MAX_FORCE*3;
     }
-    if(this.position.x>w)this.position.x=0;if(this.position.x<0)this.position.x=w;
-    if(this.position.y>h)this.position.y=0;if(this.position.y<0)this.position.y=h;
+    if(px>w)this.position.x=0;else if(px<0)this.position.x=w;
+    if(py>h)this.position.y=0;else if(py<0)this.position.y=h;
   }
   flock(nearbyBoids,obstacles,predators,dangerZones,shelters,perches,dayPhase,cursorPos,cursorMode,pond,cursorStrength){
     if(this.isFishing||this.isCollapsed||this.isPerching)return;
-    if(this.fatigue>150){this.isCollapsed=true;this.collapseTimer=100;this.velocity=new Vector2();return}
-    
-    // Separation, alignment, cohesion with nearby boids only
-    let sep=new Vector2(),ali=new Vector2(),coh=new Vector2(),sepCt=0,aliCt=0,cohCt=0;
-    const cohRadius=50*(1+(1-dayPhase)*0.5+this.sociability*0.3);
-    for(const other of nearbyBoids){
+    if(this.fatigue>150){this.isCollapsed=true;this.collapseTimer=100;this.velocity.zero();return}
+
+    const px=this.position.x,py=this.position.y,vx=this.velocity.x,vy=this.velocity.y;
+    let sepX=0,sepY=0,aliX=0,aliY=0,cohX=0,cohY=0,sepCt=0,aliCt=0,cohCt=0;
+    const cohRadius=50*(1+(1-dayPhase)*0.5+this.sociability*0.3),cohRadiusSq=cohRadius*cohRadius;
+
+    // Separation, alignment, cohesion - optimized with inline math
+    for(let i=0,len=nearbyBoids.length;i<len;i++){
+      const other=nearbyBoids[i];
       if(other===this||other.isPerching||other.isCollapsed)continue;
-      const dsq=this.position.distSq(other.position);
-      if(dsq<625){sep=sep.add(this.position.sub(other.position).div(dsq+0.001));sepCt++}
+      const ox=other.position.x,oy=other.position.y;
+      const dx=px-ox,dy=py-oy,dsq=dx*dx+dy*dy;
+      if(dsq<625){const inv=1/(dsq+0.001);sepX+=dx*inv;sepY+=dy*inv;sepCt++}
       const canFlock=this.isHybrid||other.isHybrid||other.species===this.species;
-      if(canFlock){if(dsq<2500){ali=ali.add(other.velocity);aliCt++}if(dsq<cohRadius*cohRadius){coh=coh.add(other.position);cohCt++}}
+      if(canFlock){if(dsq<2500){aliX+=other.velocity.x;aliY+=other.velocity.y;aliCt++}if(dsq<cohRadiusSq){cohX+=ox;cohY+=oy;cohCt++}}
     }
-    if(sepCt>0)sep=sep.div(sepCt).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE).mult(1.8);
-    if(aliCt>0)ali=ali.div(aliCt).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE);
-    if(cohCt>0)coh=coh.div(cohCt).sub(this.position).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE).mult(1+this.sociability*0.3);
-    
-    // Flee from predators - HIGH PRIORITY
-    let flee=new Vector2();this.fear=this.mutations.bullied?0.3:0;
-    const fleeRadius=100+(1-this.bravery)*50;
-    let inShelter=false;for(const s of shelters)if(s.contains(this.position)){inShelter=true;this.fear=this.mutations.bullied?0.2:0;break}
-    if(!inShelter){for(const pred of predators){const dsq=this.position.distSq(pred.position);if(dsq<fleeRadius*fleeRadius){const d=Math.sqrt(dsq);flee=flee.add(this.position.sub(pred.position).div(d+0.001));this.fear=Math.max(this.fear,1-d/fleeRadius)}}}
-    if(flee.mag()>0)flee=flee.normalize().mult(MAX_SPEED*(1.5+this.bravery*0.3)).sub(this.velocity).limit(MAX_FORCE*3);
-    
-    // Avoid obstacles - especially when fleeing
-    let obs=new Vector2();const obsAvoidRadius=this.fear>0.3?80:50;
-    for(const o of obstacles){const dsq=this.position.distSq(o);if(dsq<obsAvoidRadius*obsAvoidRadius){obs=obs.add(this.position.sub(o).div(dsq+0.001))}}
-    if(obs.mag()>0)obs=obs.normalize().mult(MAX_SPEED*(this.fear>0.3?1.5:1)).sub(this.velocity).limit(MAX_FORCE*(this.fear>0.3?3:2));
-    
-    // Danger zones
-    let danger=new Vector2();for(const zone of dangerZones){const dsq=this.position.distSq(zone.position);if(dsq<zone.radius*zone.radius)danger=danger.add(this.position.sub(zone.position).mult(zone.intensity))}
-    if(danger.mag()>0)danger=danger.normalize().mult(MAX_SPEED*0.5).sub(this.velocity).limit(MAX_FORCE);
-    
-    // Shelter seeking
-    let shelter=new Vector2();if(this.fear>0.3){let closest=null,closestDist=Infinity;for(const s of shelters){if(s.occupants>=s.capacity)continue;const d=this.position.distSq(s.position);if(d<closestDist){closestDist=d;closest=s}}if(closest&&closestDist<40000)shelter=closest.position.sub(this.position).normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE*2)}
-    
+
+    let ax=0,ay=0;
+    if(sepCt>0){let sx=sepX/sepCt,sy=sepY/sepCt,sm=Math.sqrt(sx*sx+sy*sy);if(sm>0){sx/=sm;sy/=sm}sx=sx*MAX_SPEED-vx;sy=sy*MAX_SPEED-vy;sm=Math.sqrt(sx*sx+sy*sy);if(sm>MAX_FORCE){sx=sx/sm*MAX_FORCE;sy=sy/sm*MAX_FORCE}ax+=sx*1.8;ay+=sy*1.8}
+    if(aliCt>0){let lx=aliX/aliCt,ly=aliY/aliCt,lm=Math.sqrt(lx*lx+ly*ly);if(lm>0){lx/=lm;ly/=lm}lx=lx*MAX_SPEED-vx;ly=ly*MAX_SPEED-vy;lm=Math.sqrt(lx*lx+ly*ly);if(lm>MAX_FORCE){lx=lx/lm*MAX_FORCE;ly=ly/lm*MAX_FORCE}ax+=lx;ay+=ly}
+    if(cohCt>0){let cx=cohX/cohCt-px,cy=cohY/cohCt-py,cm=Math.sqrt(cx*cx+cy*cy);if(cm>0){cx/=cm;cy/=cm}cx=cx*MAX_SPEED-vx;cy=cy*MAX_SPEED-vy;cm=Math.sqrt(cx*cx+cy*cy);if(cm>MAX_FORCE){cx=cx/cm*MAX_FORCE;cy=cy/cm*MAX_FORCE}const sm=1+this.sociability*0.3;ax+=cx*sm;ay+=cy*sm}
+
+    // Flee from predators - inline optimized
+    let fleeX=0,fleeY=0;this.fear=this.mutations.bullied?0.3:0;
+    const fleeRadius=100+(1-this.bravery)*50,fleeRadiusSq=fleeRadius*fleeRadius;
+    let inShelter=false;for(let i=0;i<shelters.length;i++){const s=shelters[i];const dx=s.position.x-px,dy=s.position.y-py;if(dx*dx+dy*dy<s.radius*s.radius){inShelter=true;this.fear=this.mutations.bullied?0.2:0;break}}
+    if(!inShelter){for(let i=0;i<predators.length;i++){const pred=predators[i];const dx=px-pred.position.x,dy=py-pred.position.y,dsq=dx*dx+dy*dy;if(dsq<fleeRadiusSq){const d=Math.sqrt(dsq),inv=1/(d+0.001);fleeX+=dx*inv;fleeY+=dy*inv;this.fear=Math.max(this.fear,1-d/fleeRadius)}}}
+    if(fleeX!==0||fleeY!==0){let fm=Math.sqrt(fleeX*fleeX+fleeY*fleeY);if(fm>0){fleeX/=fm;fleeY/=fm}const fs=MAX_SPEED*(1.5+this.bravery*0.3);fleeX=fleeX*fs-vx;fleeY=fleeY*fs-vy;fm=Math.sqrt(fleeX*fleeX+fleeY*fleeY);const fl=MAX_FORCE*3;if(fm>fl){fleeX=fleeX/fm*fl;fleeY=fleeY/fm*fl}const fleeMult=(this.fear>0.3?4:1)*(4-this.bravery);ax+=fleeX*fleeMult;ay+=fleeY*fleeMult}
+
+    // Avoid obstacles - inline optimized
+    let obsX=0,obsY=0;const obsAvoidRadiusSq=this.fear>0.3?6400:2500;
+    for(let i=0;i<obstacles.length;i++){const o=obstacles[i];const dx=px-o.x,dy=py-o.y,dsq=dx*dx+dy*dy;if(dsq<obsAvoidRadiusSq){const inv=1/(dsq+0.001);obsX+=dx*inv;obsY+=dy*inv}}
+    if(obsX!==0||obsY!==0){let om=Math.sqrt(obsX*obsX+obsY*obsY);if(om>0){obsX/=om;obsY/=om}const os=MAX_SPEED*(this.fear>0.3?1.5:1);obsX=obsX*os-vx;obsY=obsY*os-vy;om=Math.sqrt(obsX*obsX+obsY*obsY);const ol=MAX_FORCE*(this.fear>0.3?3:2);if(om>ol){obsX=obsX/om*ol;obsY=obsY/om*ol}ax+=obsX*(this.fear>0.3?3:1);ay+=obsY*(this.fear>0.3?3:1)}
+
+    // Danger zones - inline
+    let dangerX=0,dangerY=0;for(let i=0;i<dangerZones.length;i++){const z=dangerZones[i];const dx=px-z.position.x,dy=py-z.position.y,dsq=dx*dx+dy*dy;if(dsq<z.radius*z.radius){dangerX+=dx*z.intensity;dangerY+=dy*z.intensity}}
+    if(dangerX!==0||dangerY!==0){let dm=Math.sqrt(dangerX*dangerX+dangerY*dangerY);if(dm>0){dangerX/=dm;dangerY/=dm}dangerX=dangerX*MAX_SPEED*0.5-vx;dangerY=dangerY*MAX_SPEED*0.5-vy;dm=Math.sqrt(dangerX*dangerX+dangerY*dangerY);if(dm>MAX_FORCE){dangerX=dangerX/dm*MAX_FORCE;dangerY=dangerY/dm*MAX_FORCE}ax+=dangerX*1.5;ay+=dangerY*1.5}
+
+    // Shelter seeking - inline
+    if(this.fear>0.3){let closest=null,closestDist=Infinity;for(let i=0;i<shelters.length;i++){const s=shelters[i];if(s.occupants>=s.capacity)continue;const dx=s.position.x-px,dy=s.position.y-py,d=dx*dx+dy*dy;if(d<closestDist){closestDist=d;closest=s}}if(closest&&closestDist<40000){let sx=closest.position.x-px,sy=closest.position.y-py,sm=Math.sqrt(sx*sx+sy*sy);if(sm>0){sx/=sm;sy/=sm}sx=sx*MAX_SPEED-vx;sy=sy*MAX_SPEED-vy;sm=Math.sqrt(sx*sx+sy*sy);const sl=MAX_FORCE*2;if(sm>sl){sx=sx/sm*sl;sy=sy/sm*sl}ax+=sx*2;ay+=sy*2}}
+
     // Perching
-    let perch=new Vector2();if(!this.mutations.flightless){const threshold=60+this.laziness*30;if(this.fatigue>=threshold&&dayPhase<=0.5){let closest=null,closestDist=Infinity;for(const p of perches){const spot=p.getRestSpot();if(!spot)continue;const d=this.position.distSq(spot);if(d<closestDist){closestDist=d;closest={perch:p,spot}}}if(closest&&closestDist<32400){this.perchTarget=closest;if(closestDist<100){this.isPerching=true;this.position=closest.spot.copy();this.velocity=new Vector2();closest.perch.occupants.push(this)}else perch=closest.spot.sub(this.position).normalize().mult(MAX_SPEED*0.6).sub(this.velocity).limit(MAX_FORCE)}}}
-    
-    // Pond seeking - only when desperate AND not fleeing
-    let pondSeek=new Vector2();if(pond&&this.energy<this.maxEnergy*0.15&&this.fear<0.3){const d=this.position.distSq(pond.position);if(d<6400){if(d<625&&pond.fish.length>0){this.isFishing=true;this.fishTimer=60;this.velocity=new Vector2()}else pondSeek=pond.position.sub(this.position).normalize().mult(MAX_SPEED*0.3).sub(this.velocity).limit(MAX_FORCE*0.5)}}
-    
+    if(!this.mutations.flightless){const threshold=60+this.laziness*30;if(this.fatigue>=threshold&&dayPhase<=0.5){let closest=null,closestDist=Infinity;for(let i=0;i<perches.length;i++){const spot=perches[i].getRestSpot();if(!spot)continue;const dx=spot.x-px,dy=spot.y-py,d=dx*dx+dy*dy;if(d<closestDist){closestDist=d;closest={perch:perches[i],spot}}}if(closest&&closestDist<32400){this.perchTarget=closest;if(closestDist<100){this.isPerching=true;this.position.set(closest.spot.x,closest.spot.y);this.velocity.zero();closest.perch.occupants.push(this)}else{let pcx=closest.spot.x-px,pcy=closest.spot.y-py,pcm=Math.sqrt(pcx*pcx+pcy*pcy);if(pcm>0){pcx/=pcm;pcy/=pcm}pcx=pcx*MAX_SPEED*0.6-vx;pcy=pcy*MAX_SPEED*0.6-vy;pcm=Math.sqrt(pcx*pcx+pcy*pcy);if(pcm>MAX_FORCE){pcx=pcx/pcm*MAX_FORCE;pcy=pcy/pcm*MAX_FORCE}ax+=pcx*1.5;ay+=pcy*1.5}}}}
+
+    // Pond seeking
+    if(pond&&this.energy<this.maxEnergy*0.15&&this.fear<0.3){const dx=pond.position.x-px,dy=pond.position.y-py,d=dx*dx+dy*dy;if(d<6400){if(d<625&&pond.fish.length>0){this.isFishing=true;this.fishTimer=60;this.velocity.zero()}else{let pdx=dx,pdy=dy,pm=Math.sqrt(pdx*pdx+pdy*pdy);if(pm>0){pdx/=pm;pdy/=pm}pdx=pdx*MAX_SPEED*0.3-vx;pdy=pdy*MAX_SPEED*0.3-vy;pm=Math.sqrt(pdx*pdx+pdy*pdy);const pl=MAX_FORCE*0.5;if(pm>pl){pdx=pdx/pm*pl;pdy=pdy/pm*pl}ax+=pdx*3;ay+=pdy*3}}}
+
     // Cursor
-    let cursor=new Vector2();if(cursorPos&&cursorMode!=='none'){const dsq=this.position.distSq(cursorPos);if(dsq<10000){const d=Math.sqrt(dsq);cursor=cursorMode==='attract'?cursorPos.sub(this.position):this.position.sub(cursorPos);cursor=cursor.normalize().mult(MAX_SPEED).sub(this.velocity).limit(MAX_FORCE*2*cursorStrength).mult(1-d/100)}}
-    
-    // Apply forces - flee and obstacle avoidance have highest priority
-    const fleeMult=this.fear>0.3?4:1;
-    this.acceleration=this.acceleration.add(flee.mult(fleeMult*(4-this.bravery))).add(obs.mult(this.fear>0.3?3:1)).add(shelter.mult(2)).add(sep).add(ali).add(coh).add(danger.mult(1.5)).add(perch.mult(1.5)).add(cursor).add(pondSeek.mult(this.fear<0.3?3:0))
+    if(cursorPos&&cursorMode!=='none'){const cdx=cursorPos.x-px,cdy=cursorPos.y-py,cdsq=cdx*cdx+cdy*cdy;if(cdsq<10000){const cd=Math.sqrt(cdsq);let ccx=cursorMode==='attract'?cdx:-cdx,ccy=cursorMode==='attract'?cdy:-cdy,ccm=Math.sqrt(ccx*ccx+ccy*ccy);if(ccm>0){ccx/=ccm;ccy/=ccm}ccx=ccx*MAX_SPEED-vx;ccy=ccy*MAX_SPEED-vy;ccm=Math.sqrt(ccx*ccx+ccy*ccy);const cl=MAX_FORCE*2*cursorStrength;if(ccm>cl){ccx=ccx/ccm*cl;ccy=ccy/ccm*cl}const cf=1-cd/100;ax+=ccx*cf;ay+=ccy*cf}}
+
+    this.acceleration.x+=ax;this.acceleration.y+=ay;
   }
   update(w,h,dayPhase,shelters,pond,predators,obstacles){
     this.age++;if(this.age>this.maxAge)return{alive:false,causeOfDeath:'age'};
     if(this.isFishing){this.fishTimer--;if(this.fishTimer<=0){this.isFishing=false;if(pond){const result=pond.tryFish(this);if(result.drowned)return{alive:false,causeOfDeath:'drowned'};if(result.caught)this.energy=Math.min(this.maxEnergy,this.energy+result.food)}}return{alive:true}}
-    if(this.isPerching){this.fatigue=Math.max(0,this.fatigue-0.8);this.energy-=0.003*this.energyDrain;if((dayPhase>0.5&&this.fatigue<20)||this.fear>0.5){if(this.perchTarget){const idx=this.perchTarget.perch.occupants.indexOf(this);if(idx>-1)this.perchTarget.perch.occupants.splice(idx,1)}this.isPerching=false;this.perchTarget=null;this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2)}return{alive:this.energy>0,causeOfDeath:'starved'}}
+    if(this.isPerching){this.fatigue=Math.max(0,this.fatigue-0.8);this.energy-=0.003*this.energyDrain;if((dayPhase>0.5&&this.fatigue<20)||this.fear>0.5){if(this.perchTarget){const idx=this.perchTarget.perch.occupants.indexOf(this);if(idx>-1)this.perchTarget.perch.occupants.splice(idx,1)}this.isPerching=false;this.perchTarget=null;const a=Math.random()*Math.PI*2;this.velocity.set(Math.cos(a)*2,Math.sin(a)*2)}return{alive:this.energy>0,causeOfDeath:'starved'}}
     if(this.isCollapsed){this.collapseTimer--;if(this.collapseTimer<=0){this.isCollapsed=false;this.fatigue=50}this.energy-=0.01*this.energyDrain;return{alive:this.energy>0,causeOfDeath:'starved'}}
-    this.trail.push(this.position.copy());if(this.trail.length>6)this.trail.shift();
-    for(const s of shelters)if(s.contains(this.position))s.occupants=Math.min(s.capacity,s.occupants+0.01);
+    this.trail.push(new Vector2(this.position.x,this.position.y));if(this.trail.length>6)this.trail.shift();
+    const px=this.position.x,py=this.position.y;
+    for(let i=0;i<shelters.length;i++){const s=shelters[i];const dx=s.position.x-px,dy=s.position.y-py;if(dx*dx+dy*dy<s.radius*s.radius)s.occupants=Math.min(s.capacity,s.occupants+0.01)}
     this.energy-=(0.012+this.hunger*0.005)*this.energyDrain;this.fatigue+=(0.025-this.laziness*0.01)*(this.fatigueResistance||1);
     if(this.fear>0){this.energy-=0.04*this.energyDrain;this.fatigue+=0.04*(this.fatigueResistance||1)}
     if(this.isNocturnal&&dayPhase<0.4){this.energy+=0.005;this.fatigue-=0.01}
-    if(this.friend){const dsq=this.position.distSq(this.friend.position);if(dsq<2500){this.friendBond=Math.min(1,this.friendBond+0.001);this.fatigue-=0.005*this.friendBond}else if(dsq>40000){this.friendBond-=0.01;if(this.friendBond<=0)this.friend=null}}
+    if(this.friend){const fx=this.friend.position.x-px,fy=this.friend.position.y-py,dsq=fx*fx+fy*fy;if(dsq<2500){this.friendBond=Math.min(1,this.friendBond+0.001);this.fatigue-=0.005*this.friendBond}else if(dsq>40000){this.friendBond-=0.01;if(this.friendBond<=0)this.friend=null}}
     if(this.matingDisplay>0)this.matingDisplay-=0.02;
     const ageSlow=Math.max(0.5,1-(this.age/this.maxAge)*0.5);const speedMult=(0.6+dayPhase*0.4)*ageSlow*(this.speedMultiplier||1);const nocturnalBonus=(this.isNocturnal&&dayPhase<0.4)?1.3:1;
     const currentMaxSpeed=MAX_SPEED*speedMult*(1+this.fear*0.5)*nocturnalBonus;
-    // Collision with obstacles
-    for(const o of obstacles){const dsq=this.position.distSq(o);if(dsq<20*20){const away=this.position.sub(o).normalize().mult(MAX_FORCE*4);this.acceleration=this.acceleration.add(away)}}
-    this.velocity=this.velocity.add(this.acceleration).limit(currentMaxSpeed);this.position=this.position.add(this.velocity);this.acceleration=new Vector2();this.edges(w,h,predators);
+    // Collision with obstacles - inline
+    for(let i=0;i<obstacles.length;i++){const o=obstacles[i];const dx=px-o.x,dy=py-o.y,dsq=dx*dx+dy*dy;if(dsq<400){const m=Math.sqrt(dsq);if(m>0){this.acceleration.x+=dx/m*MAX_FORCE*4;this.acceleration.y+=dy/m*MAX_FORCE*4}}}
+    this.velocity.addM(this.acceleration).limitM(currentMaxSpeed);this.position.addM(this.velocity);this.acceleration.zero();this.edges(w,h,predators);
     if(this.energy<=0)return{alive:false,causeOfDeath:'starved'};
     if(this.shouldDie)return{alive:false,causeOfDeath:'eaten'};
     return{alive:true}
