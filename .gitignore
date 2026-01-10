@@ -21,3 +21,8 @@ npm-debug.log*
 
 # Dependencies (if added later)
 node_modules/
+
+# Rust build artifacts
+target/
+pkg/
+Cargo.lock
