@@ -205,7 +205,7 @@ class Boid{
   constructor(x,y,species=0,parentTraits=null,isHybrid=false,parentMutations=null,mutMult=1,forceMutation=null){
     this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2+Math.random()*2);this.acceleration=new Vector2();this.species=species;this.isHybrid=isHybrid;this.id=Math.random().toString(36).substr(2,9);
     this.hue=isHybrid?120+Math.random()*30:species===0?190+Math.random()*30:40+Math.random()*30;
-    this.trail=[];this.fear=0;this.energy=50+Math.random()*50;this.fatigue=0;this.age=0;this.maxAge=8000+Math.random()*4000;
+    this.trail=[];this.fear=0;this.energy=50+Math.random()*50;this.fatigue=0;this.age=0;this.maxAge=8000+Math.random()*4000;this.baseMaxAge=this.maxAge;
     this.isPerching=false;this.perchTarget=null;this.isCollapsed=false;this.collapseTimer=0;this.matingDisplay=0;this.friend=null;this.friendBond=0;
     this.maxEnergy=100;this.energyDrain=1;this.isFishing=false;this.fishTimer=0;
     if(parentTraits){this.bravery=Math.max(0,Math.min(1,parentTraits.bravery+(Math.random()-0.5)*0.2));this.hunger=Math.max(0,Math.min(1,parentTraits.hunger+(Math.random()-0.5)*0.2));this.laziness=Math.max(0,Math.min(1,parentTraits.laziness+(Math.random()-0.5)*0.2));this.sociability=Math.max(0,Math.min(1,parentTraits.sociability+(Math.random()-0.5)*0.2))}
@@ -222,7 +222,7 @@ class Boid{
     const mm=mutationMultipliers;
     this.sizeMultiplier=1;if(this.mutations.giant)this.sizeMultiplier*=mm.giant.size;if(this.mutations.tiny)this.sizeMultiplier*=mm.tiny.size;if(this.mutations.fat)this.sizeMultiplier*=mm.fat.size;if(this.mutations.chonky)this.sizeMultiplier*=mm.chonky.size;
     this.speedMultiplier=1;if(this.mutations.speedy)this.speedMultiplier*=mm.speedy.speed;if(this.mutations.tiny)this.speedMultiplier*=mm.tiny.speed;if(this.mutations.giant)this.speedMultiplier*=mm.giant.speed;if(this.mutations.fat)this.speedMultiplier*=mm.fat.speed;if(this.mutations.flightless)this.speedMultiplier*=0.5;if(this.mutations.mechanical)this.speedMultiplier*=mm.mechanical.speed;if(this.mutations.swift)this.speedMultiplier*=mm.swift.speed;if(this.mutations.wings)this.speedMultiplier*=mm.wings.speed;if(this.mutations.chonky)this.speedMultiplier*=mm.chonky.speed;
-    if(this.mutations.longlived)this.maxAge*=mm.longlived.lifespan;if(this.mutations.immortal)this.maxAge=Infinity;if(this.mutations.fragile)this.maxAge*=mm.fragile.lifespan;
+    this.maxAge=this.baseMaxAge||this.maxAge;if(this.mutations.longlived)this.maxAge*=mm.longlived.lifespan;if(this.mutations.immortal)this.maxAge=Infinity;if(this.mutations.fragile)this.maxAge*=mm.fragile.lifespan;
     this.fatigueResistance=this.mutations.tough?mm.tough.fatigue:this.mutations.mechanical?mm.mechanical.fatigue:this.mutations.wings?mm.wings.fatigue:this.mutations.hermit?0.4:1;if(this.mutations.paper)this.fatigueResistance=2;if(this.mutations.sleepy)this.fatigueResistance*=1.5;if(this.mutations.stubborn)this.fatigueResistance=0;
     if(this.mutations.zen)this.bravery=Math.min(1,this.bravery+0.4);if(this.mutations.wise)this.bravery=Math.min(1,this.bravery+0.3);
     this.isNocturnal=!!this.mutations.nocturnal;this.hasArmor=!!this.mutations.plated;this.ravenous=!!this.mutations.ravenous;this.hasCamouflage=!!this.mutations.camouflage||!!this.mutations.silent;
@@ -639,7 +639,7 @@ function App(){
     if(tool==='favorite'){const clicked=state.boids.find(b=>b.position.distSq(new Vector2(x,y))<225);if(clicked)setFavoriteBoid(f=>f===clicked.id?null:clicked.id);return}
     switch(tool){
       case'obstacle':state.obstacles.push(new Vector2(x,y));break;
-      case'remove':state.obstacles=state.obstacles.filter(o=>{const dx=o.x-x,dy=o.y-y;return dx*dx+dy*dy>400});state.boids=state.boids.filter(b=>{const dx=b.position.x-x,dy=b.position.y-y;return dx*dx+dy*dy>400});state.predators=state.predators.filter(p=>{const dx=p.position.x-x,dy=p.position.y-y;return dx*dx+dy*dy>400});break;
+      case'remove':state.obstacles=state.obstacles.filter(o=>{const dx=o.x-x,dy=o.y-y;return dx*dx+dy*dy>400});state.boids=state.boids.filter(b=>{const dx=b.position.x-x,dy=b.position.y-y;return dx*dx+dy*dy>400});state.predators=state.predators.filter(p=>{const dx=p.position.x-x,dy=p.position.y-y;return dx*dx+dy*dy>400});state.food=state.food.filter(f=>{const dx=f.position.x-x,dy=f.position.y-y;return dx*dx+dy*dy>400});state.nests=state.nests.filter(n=>{const dx=n.position.x-x,dy=n.position.y-y;return dx*dx+dy*dy>400});break;
       case'predator':const np=state.predators.find(p=>p.position.distSq(new Vector2(x,y))<6400);state.predators.push(new Predator(x,y,np?.packId??state.nextPackId++));addRipple(x,y,'rgb(255,50,50)',35);break;
       case'food':state.food.push(new FoodSource(x,y));addRipple(x,y,'rgb(100,255,150)',25);break;
       case'shelter':state.shelters.push(new Shelter(x,y));break;
