@@ -214,7 +214,7 @@ class Boid{
     this.mutations={};
     if(parentMutations){const{parent1Muts,parent2Muts}=parentMutations;const all=new Set([...Object.keys(parent1Muts||{}),...Object.keys(parent2Muts||{})]);for(const m of all){if(m==='egggiver')continue;const p1=parent1Muts&&parent1Muts[m],p2=parent2Muts&&parent2Muts[m];if(p1&&p2)this.mutations[m]=true;else if((p1||p2)&&Math.random()<0.5)this.mutations[m]=true}}
     if(forceMutation)this.mutations[forceMutation]=true;
-    else if(Math.random()<0.03*mutMult){const possible=Object.keys(mutationInfo).filter(m=>m!=='egggiver'&&m!=='phoenix'&&m!=='mimic');const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true}
+    else if(Math.random()<0.03*mutMult){const possible=Object.keys(mutationInfo).filter(m=>m!=='egggiver'&&m!=='phoenix'&&m!=='mimic'&&m!=='fighter');const avail=possible.filter(m=>!this.mutations[m]);if(avail.length>0)this.mutations[avail[Math.floor(Math.random()*avail.length)]]=true;else if(Math.random()<0.2&&!this.mutations.fighter)this.mutations.fighter=true}
     this.hasPhoenix=!!this.mutations.phoenix;this.nearDeathCount=0
     this.applyMutationEffects()
   }
@@ -247,7 +247,7 @@ class Boid{
     if(px>w)this.position.x=0;else if(px<0)this.position.x=w;
     if(py>h)this.position.y=0;else if(py<0)this.position.y=h;
   }
-  flock(nearbyBoids,obstacles,predators,dangerZones,shelters,perches,dayPhase,cursorPos,cursorMode,pond,cursorStrength){
+  flock(nearbyBoids,obstacles,predators,dangerZones,shelters,perches,dayPhase,cursorPos,cursorMode,pond,cursorStrength,vortexBoids){
     if(this.isFishing||this.isCollapsed||this.isPerching)return;
     if(this.fatigue>150){this.isCollapsed=true;this.collapseTimer=100;this.velocity.zero();return}
 
@@ -297,7 +297,10 @@ class Boid{
     if(pond&&this.energy<this.maxEnergy*0.15&&this.fear<0.3){const dx=pond.position.x-px,dy=pond.position.y-py,d=dx*dx+dy*dy;if(d<6400){if(d<625&&pond.fish.length>0){this.isFishing=true;this.fishTimer=60;this.velocity.zero()}else{let pdx=dx,pdy=dy,pm=Math.sqrt(pdx*pdx+pdy*pdy);if(pm>0){pdx/=pm;pdy/=pm}pdx=pdx*MAX_SPEED*0.3-vx;pdy=pdy*MAX_SPEED*0.3-vy;pm=Math.sqrt(pdx*pdx+pdy*pdy);const pl=MAX_FORCE*0.5;if(pm>pl){pdx=pdx/pm*pl;pdy=pdy/pm*pl}ax+=pdx*3;ay+=pdy*3}}}
 
     // Cursor - only if vortexBoids is enabled
-    if(cursorPos&&cursorMode!=='none'&&settingsRef.current.vortexBoids){const cdx=cursorPos.x-px,cdy=cursorPos.y-py,cdsq=cdx*cdx+cdy*cdy;if(cdsq<10000){const cd=Math.sqrt(cdsq);let ccx=cursorMode==='attract'?cdx:-cdx,ccy=cursorMode==='attract'?cdy:-cdy,ccm=Math.sqrt(ccx*ccx+ccy*ccy);if(ccm>0){ccx/=ccm;ccy/=ccm}ccx=ccx*MAX_SPEED-vx;ccy=ccy*MAX_SPEED-vy;ccm=Math.sqrt(ccx*ccx+ccy*ccy);const cl=MAX_FORCE*2*cursorStrength;if(ccm>cl){ccx=ccx/ccm*cl;ccy=ccy/ccm*cl}const cf=1-cd/100;ax+=ccx*cf;ay+=ccy*cf}}
+    if(cursorPos&&cursorMode!=='none'&&vortexBoids){const cdx=cursorPos.x-px,cdy=cursorPos.y-py,cdsq=cdx*cdx+cdy*cdy;if(cdsq<10000){const cd=Math.sqrt(cdsq);let ccx=cursorMode==='attract'?cdx:-cdx,ccy=cursorMode==='attract'?cdy:-cdy,ccm=Math.sqrt(ccx*ccx+ccy*ccy);if(ccm>0){ccx/=ccm;ccy/=ccm}ccx=ccx*MAX_SPEED-vx;ccy=ccy*MAX_SPEED-vy;ccm=Math.sqrt(ccx*ccx+ccy*ccy);const cl=MAX_FORCE*2*cursorStrength;if(ccm>cl){ccx=ccx/ccm*cl;ccy=ccy/ccm*cl}const cf=1-cd/100;ax+=ccx*cf;ay+=ccy*cf}}
+
+    // Drunk - random flying (hidden trait)
+    if(this.mutations.drunk){ax+=(Math.random()-0.5)*MAX_FORCE*4;ay+=(Math.random()-0.5)*MAX_FORCE*4}
 
     this.acceleration.x+=ax;this.acceleration.y+=ay;
   }
@@ -324,8 +327,8 @@ class Boid{
     return{alive:true}
   }
   canReproduce(nests,nearbyBoids,birthMult=1){
-    if(this.energy<75||this.age<400||this.fatigue>40)return{can:false};
-    let mate=null,isCrossBreed=false;for(const other of nearbyBoids){if(other===this||other.isCollapsed||other.isPerching||other.energy<60||other.age<400)continue;if(this.position.distSq(other.position)<625){mate=other;isCrossBreed=other.species!==this.species;break}}
+    if(this.energy<75||this.age<400||this.fatigue>40||this.mutations.infertile)return{can:false};
+    let mate=null,isCrossBreed=false;for(const other of nearbyBoids){if(other===this||other.isCollapsed||other.isPerching||other.energy<60||other.age<400||other.mutations.infertile)continue;if(this.position.distSq(other.position)<625){mate=other;isCrossBreed=other.species!==this.species;break}}
     if(!mate)return{can:false};
     let nearNest=false;for(const n of nests)if((n.species===this.species||n.species===mate.species)&&this.position.distSq(n.position)<1225){nearNest=true;n.births++;break}
     const baseChance=(nearNest?0.004:0.001)*birthMult;const fertilityMult=this.fertilityBonus*(mate.fertilityBonus||1);
@@ -418,13 +421,16 @@ const mutationInfo={
   // Special mutations
   egggiver:{emoji:'🥚',name:'Egg-Giver',desc:'Dies, spawns 3 mutant babies',color:'#f0abfc',type:'special'},
   phoenix:{emoji:'🔥',name:'Phoenix',desc:'Reborn once on death',color:'#f97316',type:'special'},
-  mimic:{emoji:'🎭',name:'Mimic',desc:'Copies nearby mutations',color:'#8b5cf6',type:'special'}
+  mimic:{emoji:'🎭',name:'Mimic',desc:'Copies nearby mutations',color:'#8b5cf6',type:'special'},
+  // Hidden mutations
+  drunk:{emoji:'🍺',name:'Drunk',desc:'Flies erratically',color:'#f59e0b',type:'hidden'},
+  infertile:{emoji:'🚫',name:'Infertile',desc:'Cannot reproduce',color:'#6b7280',type:'bad'}
 };
 
 function App(){
   const canvasRef=useRef(null);
   const stateRef=useRef({boids:[],obstacles:[],predators:[],food:[],trees:[],shelters:[],nests:[],dangerZones:[],ripples:[],bugs:[],corpses:[],pond:null,time:0,dayTime:0,seasonTime:0,cursorPos:null,nextPackId:0,width:900,height:450,spatialHash:new SpatialHash(50)});
-  const settingsRef=useRef({popCap:150,gameSpeed:1,mutationMult:1,birthMult:1,bugMult:1,predBreeding:true,cursorStrength:1,startBoids:60,vortexBoids:true,vortexPredators:false});
+  const settingsRef=useRef({popCap:150,gameSpeed:1,mutationMult:1,birthMult:1,bugMult:1,predBreeding:false,cursorStrength:1,startBoids:60,vortexBoids:true,vortexPredators:false});
   const animRef=useRef(null);
   const[tool,setTool]=useState('food');const[showTrails,setShowTrails]=useState(false);const[cursorMode,setCursorMode]=useState('none');
   const[stats,setStats]=useState({boids:0,day:true,season:'Spring',mutants:0,multiMutants:0,maxMutations:0,predators:0,bugs:0,fps:60});
@@ -553,7 +559,7 @@ function App(){
             // Food attraction
             for(const f of state.food){if(f.amount<=0||boid.isPerching||boid.isCollapsed||boid.fear>0.3)continue;const dsq=boid.position.distSq(f.position);const hm=0.5+boid.hunger;if(dsq<4900*hm*hm){if(dsq<144){f.amount-=0.4;const foodGain=boid.mutations.bigstomach?2:boid.mutations.smallstomach?0.5:1;boid.energy=Math.min(boid.maxEnergy,boid.energy+foodGain);boid.fatigue=Math.max(0,boid.fatigue-0.3)}else{const attract=f.position.sub(boid.position).normalize().mult(MAX_SPEED*0.4*hm).sub(boid.velocity).limit(MAX_FORCE);boid.acceleration=boid.acceleration.add(attract)}}}
             const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,2).filter(b=>b instanceof Boid);
-            boid.flock(nearbyBoids,state.obstacles,state.predators,state.dangerZones,state.shelters,perches,dayPhase,state.cursorPos,cursorModeRef.current,state.pond,settings.cursorStrength)
+            boid.flock(nearbyBoids,state.obstacles,state.predators,state.dangerZones,state.shelters,perches,dayPhase,state.cursorPos,cursorModeRef.current,state.pond,settings.cursorStrength,settings.vortexBoids)
           }
           state.boids=state.boids.filter(b=>!cannibalVictims.has(b));
           
@@ -629,7 +635,7 @@ function App(){
     if(tool==='favorite'){const clicked=state.boids.find(b=>b.position.distSq(new Vector2(x,y))<225);if(clicked)setFavoriteBoid(f=>f===clicked.id?null:clicked.id);return}
     switch(tool){
       case'obstacle':state.obstacles.push(new Vector2(x,y));break;
-      case'remove':state.obstacles=state.obstacles.filter(o=>{const dx=o.x-x,dy=o.y-y;return dx*dx+dy*dy>400});break;
+      case'remove':state.obstacles=state.obstacles.filter(o=>{const dx=o.x-x,dy=o.y-y;return dx*dx+dy*dy>400});state.boids=state.boids.filter(b=>{const dx=b.position.x-x,dy=b.position.y-y;return dx*dx+dy*dy>400});state.predators=state.predators.filter(p=>{const dx=p.position.x-x,dy=p.position.y-y;return dx*dx+dy*dy>400});break;
       case'predator':const np=state.predators.find(p=>p.position.distSq(new Vector2(x,y))<6400);state.predators.push(new Predator(x,y,np?.packId??state.nextPackId++));addRipple(x,y,'rgb(255,50,50)',35);break;
       case'food':state.food.push(new FoodSource(x,y));addRipple(x,y,'rgb(100,255,150)',25);break;
       case'shelter':state.shelters.push(new Shelter(x,y));break;
@@ -638,7 +644,7 @@ function App(){
     }
   };
   
-  const resizeCanvas=(newW,newH)=>{setCanvasSize({w:newW,h:newH});stateRef.current.width=newW;stateRef.current.height=newH;setTimeout(()=>initWorld(newW,newH),50)};
+  const resizeCanvas=(newW,newH)=>{setCanvasSize({w:newW,h:newH});stateRef.current.width=newW;stateRef.current.height=newH};
   
   const tools=[{id:'food',label:'🌿'},{id:'obstacle',label:'🪨'},{id:'remove',label:'❌'},{id:'predator',label:'👁'},{id:'shelter',label:'🏠'},{id:'nest',label:'🪺'},{id:'boid',label:'🐦'},{id:'select',label:'👆'},{id:'favorite',label:'⭐'}];
   
@@ -660,12 +666,13 @@ function App(){
         {cursorMode!=='none'&&<><label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={vortexBoids} onChange={e=>setVortexBoids(e.target.checked)} className="w-3 h-3"/><span className="text-cyan-400">🐦</span></label><label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={vortexPredators} onChange={e=>setVortexPredators(e.target.checked)} className="w-3 h-3"/><span className="text-red-400">👁</span></label></>}
         <span className="mx-1 text-gray-600">|</span>
         <button onClick={()=>setShowTrails(t=>!t)} className={`px-2 py-0.5 rounded text-xs ${showTrails?'bg-purple-600':'bg-gray-700'}`}>✨</button>
+        <button onClick={()=>{const state=stateRef.current;for(let i=0;i<20;i++){const x=Math.random()*state.width;const y=Math.random()*state.height*0.3;state.food.push(new FoodSource(x,y))}}} className="px-2 py-0.5 bg-gray-700 rounded text-xs hover:bg-green-700" title="Rain Food">🌧️</button>
         <button onClick={()=>{mutationLogRef.current=[];setMutationLog([]);setFavoriteBoid(null);initWorld(canvasSize.w,canvasSize.h)}} className="px-2 py-0.5 bg-gray-700 rounded text-xs">🔄</button>
       </div>
       
       <div className="w-full max-w-5xl mt-1 p-2 bg-gray-800 rounded border border-gray-700">
         <div className="flex flex-wrap gap-4 justify-center items-center text-xs">
-          <label className="flex items-center gap-1"><span className="text-gray-400">Pop Cap</span><input type="number" defaultValue={150} onBlur={e=>{settingsRef.current.popCap=Math.max(10,Math.min(1000,parseInt(e.target.value)||150))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
+          <label className="flex items-center gap-1"><span className="text-gray-400">Pop Cap</span><input type="number" defaultValue={150} onBlur={e=>{settingsRef.current.popCap=Math.max(1,Math.min(1000,parseInt(e.target.value)||150))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
           <label className="flex items-center gap-1"><span className="text-gray-400">Speed</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.gameSpeed=Math.max(0.5,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
           <label className="flex items-center gap-1"><span className="text-gray-400">Mut×</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.mutationMult=Math.max(0,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
           <label className="flex items-center gap-1"><span className="text-gray-400">Birth×</span><input type="number" defaultValue={1} step={0.5} onBlur={e=>{settingsRef.current.birthMult=Math.max(0,Math.min(10,parseFloat(e.target.value)||1))}} className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-center"/></label>
@@ -683,7 +690,7 @@ function App(){
             <div className="flex justify-between items-center mb-3"><h3 className="text-cyan-400 font-bold">Give Mutation to Bird</h3><button onClick={()=>setShowMutationPanel(false)} className="text-gray-400 hover:text-white">✕</button></div>
             <div className="grid grid-cols-4 gap-2">
               {Object.entries(mutationInfo).map(([key,info])=>(
-                <button key={key} onClick={()=>{giveMutation(selectedBoid,key);setShowMutationPanel(false)}} className={`p-2 rounded text-xs text-left hover:bg-gray-700 ${info.type==='good'?'bg-green-900/30':info.type==='bad'?'bg-red-900/30':info.type==='special'?'bg-purple-900/30':'bg-gray-700/50'}`}>
+                <button key={key} onClick={()=>{giveMutation(selectedBoid,key);setShowMutationPanel(false)}} className={`p-2 rounded text-xs text-left hover:bg-gray-700 ${info.type==='good'?'bg-green-900/30':info.type==='bad'?'bg-red-900/30':info.type==='special'?'bg-purple-900/30':info.type==='hidden'?'bg-orange-900/30':'bg-gray-700/50'}`}>
                   <div className="flex items-center gap-1"><span>{info.emoji}</span><span style={{color:info.color}}>{info.name}</span></div>
                   <div className="text-gray-500 text-xs mt-1">{info.desc}</div>
                 </button>
@@ -746,6 +753,14 @@ function App(){
                 const count=stateRef.current.boids.filter(b=>b.mutations[key]).length;
                 return<div key={key} className="flex items-center gap-2 p-2 rounded bg-purple-900/20 border border-purple-800/30">
                   <span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span><span className="text-purple-400 font-bold">({count})</span>
+                </div>})}</div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h4 className="text-orange-400 font-bold mb-2">🍺 Hidden Mutations</h4>
+              <div className="flex gap-2">{Object.entries(mutationInfo).filter(([,i])=>i.type==='hidden').map(([key,info])=>{
+                const count=stateRef.current.boids.filter(b=>b.mutations[key]).length;
+                return<div key={key} className="flex items-center gap-2 p-2 rounded bg-orange-900/20 border border-orange-800/30">
+                  <span>{info.emoji}</span><span style={{color:info.color}} className="font-medium">{info.name}</span><span className="text-gray-400 text-xs ml-1">{info.desc}</span><span className="text-orange-400 font-bold">({count})</span>
                 </div>})}</div>
             </div>
             <div className="mt-4 pt-4 border-t border-gray-700">
