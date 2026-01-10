@@ -429,6 +429,7 @@ function App(){
   const[vortexBoids,setVortexBoids]=useState(true);const[vortexPredators,setVortexPredators]=useState(false);
   const[showRoster,setShowRoster]=useState(true);const[showLog,setShowLog]=useState(true);
   const[expandRoster,setExpandRoster]=useState(false);const[expandLog,setExpandLog]=useState(false);const[expandLegend,setExpandLegend]=useState(true);
+  const[showPredRoster,setShowPredRoster]=useState(true);
   
   const pausedRef=useRef(false);const showTrailsRef=useRef(false);const cursorModeRef=useRef('none');const favoriteRef=useRef(null);
   const mutationLogRef=useRef([]);const lastFrameTime=useRef(performance.now());const fpsRef=useRef(60);
@@ -790,8 +791,8 @@ function App(){
 
       {predatorRoster.length>0&&(
       <div className="w-full max-w-5xl mt-1">
-        <div className="flex items-center gap-2 mb-1"><span className="text-red-400 text-sm font-bold">👁 Predator Roster</span><span className="text-gray-600 text-xs">({predatorRoster.length} predators)</span></div>
-        <div className="bg-gray-800 rounded border border-red-900 h-32 overflow-y-auto scroll-stable">
+        <div className="flex items-center gap-2 mb-1 cursor-pointer" onClick={()=>setShowPredRoster(r=>!r)}><button className="text-gray-500 hover:text-white text-xs">{showPredRoster?'▼':'▶'}</button><span className="text-red-400 text-sm font-bold">👁 Predator Roster</span><span className="text-gray-600 text-xs">({predatorRoster.length})</span></div>
+        {showPredRoster&&<div className="bg-gray-800 rounded border border-red-900 h-32 overflow-y-auto scroll-stable">
           <div className="p-2 flex flex-wrap gap-2">{predatorRoster.map(pred=>(
             <div key={pred.id} className={`p-2 rounded bg-red-900/20 border ${pred.isLeader?'border-yellow-500':'border-red-700'} cursor-pointer hover:bg-red-900/40`} onClick={()=>{setSelectedPredator(pred.id);setShowPredMutPanel(true)}}>
               <div className="flex items-center gap-2 mb-1">
@@ -805,7 +806,7 @@ function App(){
               {pred.mutations.length>0&&<div className="flex flex-wrap gap-1 mt-1">{pred.mutations.map(mut=>{const info=mutationInfo[mut];return info?<span key={mut} className="inline-flex items-center gap-0.5 px-1 rounded text-xs" style={{backgroundColor:info.color+'22',color:info.color}}><span>{info.emoji}</span><span>{info.name}</span></span>:null})}</div>}
             </div>
           ))}</div>
-        </div>
+        </div>}
       </div>
       )}
       
