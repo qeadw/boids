@@ -170,8 +170,8 @@ class Predator{
         if(!target.mutations.fighter&&!target.nearDeathTriggered){target.nearDeathCount=(target.nearDeathCount||0)+1;target.nearDeathTriggered=true;if(Math.random()<0.03){target.mutations.fighter=true;target.canFight=true;target.justEvolvedFighter=true}}
         // Electric shock
         if(target.mutations.electric&&Math.random()<0.4){this.energy-=20;target.fear=0.8;return null}
-        // Fighter mutation - 50% chance to fight off predator
-        if(target.mutations.fighter&&Math.random()<0.5){this.energy-=15;target.fear=0.5;target.justFoughtOff=true;return null}
+        // Fighter mutation - 50% chance to fight, 40% of fights kill the predator
+        if(target.mutations.fighter&&Math.random()<0.5){target.justFoughtOff=true;if(Math.random()<0.4){this.killedByFighter=true;target.justKilledPredator=true}else{this.energy-=25}target.fear=0.3;return null}
         // Lucky mutation gives better odds
         if(target.mutations.lucky&&Math.random()<0.3){target.fear=1;return null}
         // Acrobat dodge
@@ -504,6 +504,7 @@ function App(){
           for(const boid of state.boids){
             if(boid.armorJustBroke){boid.armorJustBroke=false;addMutationLog('plated','armor_broke',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(100,150,255)',35)}
             if(boid.justFoughtOff){boid.justFoughtOff=false;addRipple(boid.position.x,boid.position.y,'rgb(255,100,50)',30)}
+            if(boid.justKilledPredator){boid.justKilledPredator=false;addMutationLog('fighter','killed_pred',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(255,0,0)',60)}
             if(boid.justEvolvedFighter){boid.justEvolvedFighter=false;addMutationLog('fighter','evolved',boid.species,boid.isHybrid);addRipple(boid.position.x,boid.position.y,'rgb(255,200,0)',45)}
             boid.nearDeathTriggered=false;
             // Healer regeneration
@@ -516,7 +517,9 @@ function App(){
           state.boids=state.boids.filter(b=>!caughtBoids.has(b));state.predators.push(...newPredatorsFromTraitors);
           
           const newPredators=[];
-          state.predators=state.predators.filter(p=>{const alive=p.update(w,h,state.obstacles,state.cursorPos,cursorModeRef.current,settings.cursorStrength,settings.vortexPredators);if(!alive)addRipple(p.position.x,p.position.y,'rgb(100,100,100)',35);if(settings.predBreeding&&alive&&p.energy>130&&p.kills>=3&&Math.random()<0.01){p.energy-=50;const child=new Predator(p.position.x+(Math.random()-0.5)*30,p.position.y+(Math.random()-0.5)*30,p.packId,p.generation+1,{...p.mutations});newPredators.push(child);addRipple(p.position.x,p.position.y,'rgb(255,150,50)',40)}return alive});
+          state.predators=state.predators.filter(p=>{
+            if(p.killedByFighter){addRipple(p.position.x,p.position.y,'rgb(255,50,50)',50);return false}
+            const alive=p.update(w,h,state.obstacles,state.cursorPos,cursorModeRef.current,settings.cursorStrength,settings.vortexPredators);if(!alive)addRipple(p.position.x,p.position.y,'rgb(100,100,100)',35);if(settings.predBreeding&&alive&&p.energy>130&&p.kills>=3&&Math.random()<0.01){p.energy-=50;const child=new Predator(p.position.x+(Math.random()-0.5)*30,p.position.y+(Math.random()-0.5)*30,p.packId,p.generation+1,{...p.mutations});newPredators.push(child);addRipple(p.position.x,p.position.y,'rgb(255,150,50)',40)}return alive});
           state.predators.push(...newPredators);
           
           const perches=state.trees.map(t=>t.perch);
@@ -770,8 +773,8 @@ function App(){
           {showLog&&<div className="bg-gray-800 rounded border border-gray-700 h-36 overflow-y-auto scroll-stable">
             {mutationLog.length===0?<div className="flex items-center justify-center h-full text-gray-600 text-sm">Waiting for mutations...</div>:
             <div className="p-2 space-y-1.5">{mutationLog.map(entry=>{
-              const eventLabel=entry.event==='new'?'New Mutation':entry.event==='given'?'Given':entry.event==='given_pred'?'Given Pred':entry.event==='egg'?'Egg Birth':entry.event==='inherited'?'Inherited':entry.event==='both'?'Both Parents':entry.event==='armor_broke'?'Armor Broke':entry.event==='evolved'?'Evolved':'Event';
-              const eventColor=entry.event==='new'?'bg-yellow-500/20 text-yellow-400 border-yellow-500/30':entry.event==='given'||entry.event==='given_pred'?'bg-orange-500/20 text-orange-400 border-orange-500/30':entry.event==='egg'?'bg-pink-500/20 text-pink-400 border-pink-500/30':entry.event==='armor_broke'?'bg-blue-500/20 text-blue-400 border-blue-500/30':entry.event==='evolved'?'bg-red-500/20 text-red-400 border-red-500/30':'bg-purple-500/20 text-purple-400 border-purple-500/30';
+              const eventLabel=entry.event==='new'?'New Mutation':entry.event==='given'?'Given':entry.event==='given_pred'?'Given Pred':entry.event==='egg'?'Egg Birth':entry.event==='inherited'?'Inherited':entry.event==='both'?'Both Parents':entry.event==='armor_broke'?'Armor Broke':entry.event==='evolved'?'Evolved':entry.event==='killed_pred'?'⚔️ KILLED PRED':'Event';
+              const eventColor=entry.event==='new'?'bg-yellow-500/20 text-yellow-400 border-yellow-500/30':entry.event==='given'||entry.event==='given_pred'?'bg-orange-500/20 text-orange-400 border-orange-500/30':entry.event==='egg'?'bg-pink-500/20 text-pink-400 border-pink-500/30':entry.event==='armor_broke'?'bg-blue-500/20 text-blue-400 border-blue-500/30':entry.event==='evolved'?'bg-red-500/20 text-red-400 border-red-500/30':entry.event==='killed_pred'?'bg-red-600/40 text-red-300 border-red-400/50':'bg-purple-500/20 text-purple-400 border-purple-500/30';
               const speciesColor=entry.speciesName==='Hybrid'?'text-green-400':entry.speciesName==='Cyan'?'text-cyan-400':entry.speciesName==='Predator'?'text-red-400':'text-yellow-400';
               return<div key={entry.id} className="flex items-center gap-2 p-1.5 rounded bg-gray-900/30 text-xs">
                 <span className="text-gray-500 w-14">{entry.timestamp}</span>
