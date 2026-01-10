@@ -552,10 +552,16 @@ function App(){
           const cannibalVictims=new Set();
           
           for(const boid of state.boids){
-            // Cannibal check
+            // Cannibal check - eats live boids when hungry, also seeks corpses
             if(boid.mutations.cannibal&&boid.energy<boid.maxEnergy*0.2){
               const nearby=state.spatialHash.getNearby(boid.position.x,boid.position.y,1);
-              for(const other of nearby){if(other instanceof Boid&&other!==boid&&!other.isCollapsed&&boid.position.distSq(other.position)<225){boid.energy=Math.min(boid.maxEnergy,boid.energy+30);cannibalVictims.add(other);addRipple(other.position.x,other.position.y,'rgb(200,50,50)',30);break}}}
+              let ate=false;
+              for(const other of nearby){if(other instanceof Boid&&other!==boid&&!other.isCollapsed&&boid.position.distSq(other.position)<225){boid.energy=Math.min(boid.maxEnergy,boid.energy+30);cannibalVictims.add(other);addRipple(other.position.x,other.position.y,'rgb(200,50,50)',30);ate=true;break}}
+              // Cannibals eat corpses more efficiently
+              if(!ate){for(const c of state.corpses){if(boid.position.distSq(c.position)<225&&c.nutrition>0){c.nutrition-=5;boid.energy=Math.min(boid.maxEnergy,boid.energy+8);addRipple(c.position.x,c.position.y,'rgb(150,80,80)',15);break}}}
+              // Seek nearest corpse if hungry
+              let nearestCorpse=null,nearestDist=Infinity;for(const c of state.corpses){if(c.nutrition>0){const d=boid.position.distSq(c.position);if(d<nearestDist){nearestDist=d;nearestCorpse=c}}}
+              if(nearestCorpse&&nearestDist<10000){const seek=nearestCorpse.position.sub(boid.position).normalize().mult(MAX_SPEED*0.5).sub(boid.velocity).limit(MAX_FORCE);boid.acceleration=boid.acceleration.add(seek)}}
             // Bug eating
             for(const bug of state.bugs)if(boid.position.distSq(bug.position)<144){bug.energy=0;boid.energy=Math.min(boid.maxEnergy,boid.energy+8);boid.fatigue=Math.max(0,boid.fatigue-2)}
             // Corpse eating
