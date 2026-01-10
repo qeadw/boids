@@ -464,6 +464,8 @@ function App(){
     return()=>window.removeEventListener('keydown',handleKeyDown);
   },[]);
 
+  useEffect(()=>{try{(window.adsbygoogle=window.adsbygoogle||[]).push({})}catch(e){}},[]);
+
   const addRipple=useCallback((x,y,color,size)=>{stateRef.current.ripples.push(new Ripple(x,y,color,size))},[]);
   const addMutationLog=useCallback((type,event,boidSpecies,isHybrid)=>{const info=mutationInfo[type];if(!info)return;const speciesName=isHybrid?'Hybrid':(boidSpecies===0?'Cyan':'Gold');const logEntry={id:Date.now()+Math.random(),timestamp:new Date().toLocaleTimeString(),type,info,speciesName,event};mutationLogRef.current=[logEntry,...mutationLogRef.current];setMutationLog([...mutationLogRef.current])},[]);
   const addDangerZone=useCallback((x,y)=>{const state=stateRef.current;for(const z of state.dangerZones)if(z.position.distSq(new Vector2(x,y))<1600)return;state.dangerZones.push(new DangerZone(x,y))},[]);
@@ -901,6 +903,10 @@ function App(){
       
       <div className="w-full max-w-5xl mt-1 p-1 bg-gray-800/50 rounded border border-gray-700 cursor-pointer" onClick={()=>setExpandLegend(e=>!e)}>
         <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).filter(([,info])=>info.type!=='hidden').map(([key,info])=>expandLegend?<span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'15',color:info.color,border:`1px solid ${info.color}33`}} title={info.desc}><span>{info.emoji}</span><span>{info.name}</span></span>:<span key={key} className="text-sm" style={{color:info.color}} title={`${info.name}: ${info.desc}`}>{info.emoji}</span>)}</div>
+      </div>
+
+      <div className="w-full max-w-5xl mt-4 flex justify-center">
+        <ins className="adsbygoogle" style={{display:'block',width:'728px',height:'90px'}} data-ad-client="ca-pub-5208040607034628" data-ad-slot="auto" data-ad-format="horizontal" data-full-width-responsive="true"></ins>
       </div>
     </div>
   )
