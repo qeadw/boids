@@ -24,5 +24,4 @@ node_modules/
 
 # Rust build artifacts
 target/
-pkg/
 Cargo.lock

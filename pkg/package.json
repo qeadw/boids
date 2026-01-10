@@ -1,0 +1,19 @@
+{
+  "name": "boids",
+  "type": "module",
+  "collaborators": [
+    "Avery Opela <averyopela1@gmail.com>"
+  ],
+  "description": "High-performance boids flocking simulation in Rust/WebAssembly",
+  "version": "0.1.0",
+  "files": [
+    "boids_bg.wasm",
+    "boids.js",
+    "boids.d.ts"
+  ],
+  "main": "boids.js",
+  "types": "boids.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
