@@ -428,7 +428,7 @@ function App(){
   const[predatorRoster,setPredatorRoster]=useState([]);const[showDNALab,setShowDNALab]=useState(false);
   const[vortexBoids,setVortexBoids]=useState(true);const[vortexPredators,setVortexPredators]=useState(false);
   const[showRoster,setShowRoster]=useState(true);const[showLog,setShowLog]=useState(true);
-  const[expandRoster,setExpandRoster]=useState(false);const[expandLog,setExpandLog]=useState(false);
+  const[expandRoster,setExpandRoster]=useState(false);const[expandLog,setExpandLog]=useState(false);const[expandLegend,setExpandLegend]=useState(true);
   
   const pausedRef=useRef(false);const showTrailsRef=useRef(false);const cursorModeRef=useRef('none');const favoriteRef=useRef(null);
   const mutationLogRef=useRef([]);const lastFrameTime=useRef(performance.now());const fpsRef=useRef(60);
@@ -809,8 +809,8 @@ function App(){
       </div>
       )}
       
-      <div className="w-full max-w-5xl mt-1 p-2 bg-gray-800/50 rounded border border-gray-700">
-        <div className="flex flex-wrap gap-1.5 justify-center">{Object.entries(mutationInfo).map(([key,info])=><span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'15',color:info.color,border:`1px solid ${info.color}33`}} title={info.desc}><span>{info.emoji}</span><span>{info.name}</span></span>)}</div>
+      <div className="w-full max-w-5xl mt-1 p-1 bg-gray-800/50 rounded border border-gray-700 cursor-pointer" onClick={()=>setExpandLegend(e=>!e)}>
+        <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).map(([key,info])=>expandLegend?<span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'15',color:info.color,border:`1px solid ${info.color}33`}} title={info.desc}><span>{info.emoji}</span><span>{info.name}</span></span>:<span key={key} className="text-sm" style={{color:info.color}} title={`${info.name}: ${info.desc}`}>{info.emoji}</span>)}</div>
       </div>
     </div>
   )
