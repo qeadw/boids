@@ -17,13 +17,13 @@
 const{useState,useEffect,useRef,useCallback}=React;
 const MAX_SPEED=4,MAX_FORCE=0.15;
 
-// Spatial hash for optimization
+// Spatial hash for optimization - uses integer keys for speed
 class SpatialHash{
   constructor(cellSize=50){this.cellSize=cellSize;this.cells=new Map()}
   clear(){this.cells.clear()}
-  getKey(x,y){return`${Math.floor(x/this.cellSize)},${Math.floor(y/this.cellSize)}`}
+  getKey(x,y){return((Math.floor(x/this.cellSize)+500)&0xFFFF)|((Math.floor(y/this.cellSize)+500)<<16)}
   insert(obj){const key=this.getKey(obj.position.x,obj.position.y);if(!this.cells.has(key))this.cells.set(key,[]);this.cells.get(key).push(obj)}
-  getNearby(x,y,radius=1){const results=[];const cx=Math.floor(x/this.cellSize),cy=Math.floor(y/this.cellSize);for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++){const key=`${cx+dx},${cy+dy}`;if(this.cells.has(key))results.push(...this.cells.get(key))}return results}
+  getNearby(x,y,radius=1){const results=[];const cx=Math.floor(x/this.cellSize),cy=Math.floor(y/this.cellSize);for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++){const key=((cx+dx+500)&0xFFFF)|((cy+dy+500)<<16);if(this.cells.has(key))results.push(...this.cells.get(key))}return results}
 }
 
 // Vector2 object pool to reduce GC pressure
@@ -125,7 +125,7 @@ class Corpse{
 }
 
 class Predator{
-  constructor(x,y,packId=0,gen=0,mutations={}){this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2);this.acceleration=new Vector2();this.baseSpeed=3.5+gen*0.3;this.maxSpeed=this.baseSpeed;this.maxForce=0.1+gen*0.02;this.energy=100;this.packId=packId;this.isLeader=false;this.generation=gen;this.kills=0;this.mutations=mutations;this.targetBoid=null;this.id=Math.random().toString(36).substr(2,9);this.applyMutationEffects()}
+  constructor(x,y,packId=0,gen=0,mutations={}){this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2);this.acceleration=new Vector2();this.baseSpeed=3.5+gen*0.3;this.maxSpeed=this.baseSpeed;this.maxForce=0.1+gen*0.02;this.energy=100;this.packId=packId;this.isLeader=false;this.generation=gen;this.kills=0;this.mutations=mutations;this.targetBoid=null;this.id=Math.random().toString(36).substr(2,9);this.isPredator=true;this.applyMutationEffects()}
   applyMutationEffects(){
     // Speed mutations
     if(this.mutations.speedy)this.baseSpeed*=1.3;if(this.mutations.swift)this.baseSpeed*=1.15;if(this.mutations.fat)this.baseSpeed*=0.8;
@@ -146,7 +146,7 @@ class Predator{
     const maxDistSq=22500*agg*agg;
     for(let i=0;i<nearby.length;i++){
       const boid=nearby[i];
-      if(!(boid instanceof Boid))continue;
+      if(!boid.isBoid)continue;
       const bx=boid.position.x,by=boid.position.y;
       let inShelter=false;for(let j=0;j<shelters.length;j++){const s=shelters[j];const dx=s.position.x-bx,dy=s.position.y-by;if(dx*dx+dy*dy<s.radius*s.radius){inShelter=true;break}}
       if(inShelter)continue;
@@ -204,7 +204,7 @@ class Predator{
 
 class Boid{
   constructor(x,y,species=0,parentTraits=null,isHybrid=false,parentMutations=null,mutMult=1,forceMutation=null){
-    this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2+Math.random()*2);this.acceleration=new Vector2();this.species=species;this.isHybrid=isHybrid;this.id=Math.random().toString(36).substr(2,9);
+    this.position=new Vector2(x,y);this.velocity=Vector2.fromAngle(Math.random()*Math.PI*2,2+Math.random()*2);this.acceleration=new Vector2();this.species=species;this.isHybrid=isHybrid;this.id=Math.random().toString(36).substr(2,9);this.isBoid=true;
     this.hue=isHybrid?120+Math.random()*30:species===0?190+Math.random()*30:40+Math.random()*30;
     this.trail=[];this.fear=0;this.energy=50+Math.random()*50;this.fatigue=0;this.age=0;this.maxAge=8000+Math.random()*4000;this.baseMaxAge=this.maxAge;
     this.isPerching=false;this.perchTarget=null;this.isCollapsed=false;this.collapseTimer=0;this.matingDisplay=0;this.friend=null;this.friendBond=0;
@@ -432,7 +432,7 @@ const mutationInfo={
 
 function App(){
   const canvasRef=useRef(null);
-  const stateRef=useRef({boids:[],obstacles:[],predators:[],food:[],trees:[],shelters:[],nests:[],dangerZones:[],ripples:[],bugs:[],corpses:[],pond:null,time:0,dayTime:0,seasonTime:0,cursorPos:null,nextPackId:0,width:900,height:450,spatialHash:new SpatialHash(50)});
+  const stateRef=useRef({boids:[],obstacles:[],predators:[],food:[],trees:[],shelters:[],nests:[],dangerZones:[],ripples:[],bugs:[],corpses:[],pond:null,time:0,dayTime:0,seasonTime:0,cursorPos:null,nextPackId:0,width:900,height:450,spatialHash:new SpatialHash(50),perches:[]});
   const settingsRef=useRef({popCap:150,gameSpeed:1,mutationMult:1,birthMult:1,bugMult:1,predBreeding:false,cursorStrength:1,startBoids:60,vortexBoids:true,vortexPredators:false});
   const animRef=useRef(null);
   const[tool,setTool]=useState('food');const[showTrails,setShowTrails]=useState(false);const[cursorMode,setCursorMode]=useState('none');
@@ -480,6 +480,7 @@ function App(){
     for(const b of state.boids)if(Math.random()<0.3){const cands=state.boids.filter(o=>o!==b&&o.species===b.species&&!o.friend);if(cands.length>0){const f=cands[Math.floor(Math.random()*cands.length)];b.friend=f;f.friend=b;b.friendBond=0.5;f.friendBond=0.5}}
     state.obstacles=[];state.predators=[];state.food=[];state.dangerZones=[];state.ripples=[];state.bugs=[];state.corpses=[];state.dayTime=0;state.seasonTime=0;state.nextPackId=0;
     state.trees=[new Tree(w*0.1,h-30),new Tree(w*0.3,h-35),new Tree(w*0.5,h-30),new Tree(w*0.7,h-40),new Tree(w*0.9,h-30)];
+    state.perches=state.trees.map(t=>t.perch);
     state.shelters=[new Shelter(80,h-100),new Shelter(w-80,h-100)];
     state.nests=[new Nest(w*0.22,h-130,0),new Nest(w*0.78,h-130,1)];
     state.pond=new Pond(w*0.5,h-80,100,50);
@@ -555,7 +556,7 @@ function App(){
             const alive=p.update(w,h,state.obstacles,state.cursorPos,cursorModeRef.current,settings.cursorStrength,settings.vortexPredators);if(!alive)addRipple(p.position.x,p.position.y,'rgb(100,100,100)',35);if(settings.predBreeding&&alive&&p.energy>130&&p.kills>=3&&Math.random()<0.01){p.energy-=50;const child=new Predator(p.position.x+(Math.random()-0.5)*30,p.position.y+(Math.random()-0.5)*30,p.packId,p.generation+1,{...p.mutations});newPredators.push(child);addRipple(p.position.x,p.position.y,'rgb(255,150,50)',40)}return alive});
           state.predators.push(...newPredators);
           
-          const perches=state.trees.map(t=>t.perch);
+          const perches=state.perches;
           const cannibalVictims=new Set();
           
           for(const boid of state.boids){
@@ -563,19 +564,19 @@ function App(){
             if(boid.mutations.cannibal&&boid.energy<boid.maxEnergy*0.2){
               const nearby=state.spatialHash.getNearby(boid.position.x,boid.position.y,1);
               let ate=false;
-              for(const other of nearby){if(other instanceof Boid&&other!==boid&&!other.isCollapsed&&boid.position.distSq(other.position)<225){boid.energy=Math.min(boid.maxEnergy,boid.energy+30);cannibalVictims.add(other);addRipple(other.position.x,other.position.y,'rgb(200,50,50)',30);ate=true;break}}
+              for(const other of nearby){if(other.isBoid&&other!==boid&&!other.isCollapsed&&boid.position.distSq(other.position)<225){boid.energy=Math.min(boid.maxEnergy,boid.energy+30);cannibalVictims.add(other);addRipple(other.position.x,other.position.y,'rgb(200,50,50)',30);ate=true;break}}
               // Cannibals eat corpses more efficiently
               if(!ate){for(const c of state.corpses){if(boid.position.distSq(c.position)<225&&c.nutrition>0){c.nutrition-=5;boid.energy=Math.min(boid.maxEnergy,boid.energy+8);addRipple(c.position.x,c.position.y,'rgb(150,80,80)',15);break}}}
               // Seek nearest corpse if hungry
               let nearestCorpse=null,nearestDist=Infinity;for(const c of state.corpses){if(c.nutrition>0){const d=boid.position.distSq(c.position);if(d<nearestDist){nearestDist=d;nearestCorpse=c}}}
-              if(nearestCorpse&&nearestDist<10000){const seek=nearestCorpse.position.sub(boid.position).normalize().mult(MAX_SPEED*0.5).sub(boid.velocity).limit(MAX_FORCE);boid.acceleration=boid.acceleration.add(seek)}}
+              if(nearestCorpse&&nearestDist<10000){let dx=nearestCorpse.position.x-boid.position.x,dy=nearestCorpse.position.y-boid.position.y,m=Math.sqrt(dx*dx+dy*dy);if(m>0){dx/=m;dy/=m}dx=dx*MAX_SPEED*0.5-boid.velocity.x;dy=dy*MAX_SPEED*0.5-boid.velocity.y;m=Math.sqrt(dx*dx+dy*dy);if(m>MAX_FORCE){dx=dx/m*MAX_FORCE;dy=dy/m*MAX_FORCE}boid.acceleration.x+=dx;boid.acceleration.y+=dy}}
             // Bug eating
             for(const bug of state.bugs)if(boid.position.distSq(bug.position)<144){bug.energy=0;boid.energy=Math.min(boid.maxEnergy,boid.energy+8);boid.fatigue=Math.max(0,boid.fatigue-2)}
             // Corpse eating
             for(const c of state.corpses)if(boid.position.distSq(c.position)<225&&c.nutrition>0){c.nutrition-=0.5;boid.energy=Math.min(boid.maxEnergy,boid.energy+0.3)}
             // Food attraction
-            for(const f of state.food){if(f.amount<=0||boid.isPerching||boid.isCollapsed||boid.fear>0.3)continue;const dsq=boid.position.distSq(f.position);const hm=0.5+boid.hunger;if(dsq<4900*hm*hm){if(dsq<144){f.amount-=0.4;const foodGain=boid.mutations.bigstomach?2:boid.mutations.smallstomach?0.5:1;boid.energy=Math.min(boid.maxEnergy,boid.energy+foodGain);boid.fatigue=Math.max(0,boid.fatigue-0.3)}else{const attract=f.position.sub(boid.position).normalize().mult(MAX_SPEED*0.4*hm).sub(boid.velocity).limit(MAX_FORCE);boid.acceleration=boid.acceleration.add(attract)}}}
-            const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,2).filter(b=>b instanceof Boid);
+            for(const f of state.food){if(f.amount<=0||boid.isPerching||boid.isCollapsed||boid.fear>0.3)continue;const dsq=boid.position.distSq(f.position);const hm=0.5+boid.hunger;if(dsq<4900*hm*hm){if(dsq<144){f.amount-=0.4;const foodGain=boid.mutations.bigstomach?2:boid.mutations.smallstomach?0.5:1;boid.energy=Math.min(boid.maxEnergy,boid.energy+foodGain);boid.fatigue=Math.max(0,boid.fatigue-0.3)}else{let dx=f.position.x-boid.position.x,dy=f.position.y-boid.position.y,m=Math.sqrt(dx*dx+dy*dy);if(m>0){dx/=m;dy/=m}const spd=MAX_SPEED*0.4*hm;dx=dx*spd-boid.velocity.x;dy=dy*spd-boid.velocity.y;m=Math.sqrt(dx*dx+dy*dy);if(m>MAX_FORCE){dx=dx/m*MAX_FORCE;dy=dy/m*MAX_FORCE}boid.acceleration.x+=dx;boid.acceleration.y+=dy}}}
+            const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,2).filter(b=>b.isBoid);
             boid.flock(nearbyBoids,state.obstacles,state.predators,state.dangerZones,state.shelters,perches,dayPhase,state.cursorPos,cursorModeRef.current,state.pond,settings.cursorStrength,settings.vortexBoids)
           }
           state.boids=state.boids.filter(b=>!cannibalVictims.has(b));
@@ -592,8 +593,8 @@ function App(){
               if(boid.mutations.traitor&&result.causeOfDeath!=='drowned'){state.predators.push(new Predator(boid.position.x,boid.position.y,state.nextPackId++,0,{}));addRipple(boid.position.x,boid.position.y,'rgb(128,0,255)',50)}
               if(boid.mutations.egggiver){for(let i=0;i<3;i++){const allMuts=Object.keys(mutationInfo).filter(m=>m!=='egggiver');const randomMut=allMuts[Math.floor(Math.random()*allMuts.length)];eggBabies.push(new Boid(boid.position.x+(Math.random()-0.5)*30,boid.position.y+(Math.random()-0.5)*30,boid.species,null,false,null,1,randomMut));addMutationLog(randomMut,'egg',boid.species,false)}addRipple(boid.position.x,boid.position.y,'rgb(255,200,255)',60)}
             }
-            if(result.alive&&state.boids.length+newBoids.length<settings.popCap){
-              const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,1).filter(b=>b instanceof Boid);
+            if(result.alive&&state.boids.length+newBoids.length<settings.popCap&&state.time%48<16){
+              const nearbyBoids=state.spatialHash.getNearby(boid.position.x,boid.position.y,1).filter(b=>b.isBoid);
               const reproResult=boid.canReproduce(state.nests,nearbyBoids,settings.birthMult);
               if(reproResult.can){
                 boid.energy-=35;boid.matingDisplay=1;if(reproResult.mate){reproResult.mate.energy-=25;reproResult.mate.matingDisplay=0.8}
@@ -612,7 +613,7 @@ function App(){
           state.boids.push(...newBoids,...eggBabies);
           
           // Friendship forming
-          if(state.time%1000<20){for(const boid of state.boids)if(!boid.friend&&boid.sociability>0.5){const cands=state.spatialHash.getNearby(boid.position.x,boid.position.y,1).filter(b=>b instanceof Boid&&b!==boid&&b.species===boid.species&&!b.friend);if(cands.length>0){const f=cands[0];boid.friend=f;f.friend=boid;boid.friendBond=0.3;f.friendBond=0.3;break}}}
+          if(state.time%1000<20){for(const boid of state.boids)if(!boid.friend&&boid.sociability>0.5){const cands=state.spatialHash.getNearby(boid.position.x,boid.position.y,1).filter(b=>b.isBoid&&b!==boid&&b.species===boid.species&&!b.friend);if(cands.length>0){const f=cands[0];boid.friend=f;f.friend=boid;boid.friendBond=0.3;f.friendBond=0.3;break}}}
           
           // Stats update (throttled)
           if(state.time%500<20){
