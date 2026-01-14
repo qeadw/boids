@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Living World - Boids</title>
+  <meta name="description" content="Interactive boids flocking simulation demonstrating emergent behavior, predator-prey dynamics, genetic mutations, and artificial life. Learn about Craig Reynolds' classic algorithm with this educational WebAssembly-powered visualization.">
+  <meta name="keywords" content="boids, flocking simulation, emergent behavior, artificial life, Craig Reynolds, swarm intelligence, agent-based modeling, WebAssembly, predator prey, genetic algorithm">
+  <meta name="author" content="Living World Simulation">
+  <title>Living World - Boids Flocking Simulation | Emergent Behavior & Artificial Life</title>
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3573301653558122"
      crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -905,6 +908,56 @@ function App(){
       
       <div className="w-full max-w-5xl mt-1 p-1 bg-gray-800/50 rounded border border-gray-700 cursor-pointer" onClick={()=>setExpandLegend(e=>!e)}>
         <div className="flex flex-wrap gap-1 justify-center">{Object.entries(mutationInfo).filter(([,info])=>info.type!=='hidden').map(([key,info])=>expandLegend?<span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs" style={{backgroundColor:info.color+'15',color:info.color,border:`1px solid ${info.color}33`}} title={info.desc}><span>{info.emoji}</span><span>{info.name}</span></span>:<span key={key} className="text-sm" style={{color:info.color}} title={`${info.name}: ${info.desc}`}>{info.emoji}</span>)}</div>
+      </div>
+
+      <div className="w-full max-w-5xl mt-6 p-6 bg-gray-800/80 rounded-lg border border-gray-700">
+        <h2 className="text-2xl font-bold text-cyan-400 mb-4">About Boids: Artificial Life Simulation</h2>
+
+        <div className="grid md:grid-cols-2 gap-6 text-gray-300 text-sm leading-relaxed">
+          <div>
+            <h3 className="text-lg font-semibold text-yellow-400 mb-2">What Are Boids?</h3>
+            <p className="mb-3">
+              Boids (short for "bird-oid objects") is an artificial life program developed by Craig Reynolds in 1986 that simulates the flocking behavior of birds. The simulation demonstrates how complex group behaviors can emerge from simple individual rules, a concept known as emergent behavior.
+            </p>
+            <p className="mb-3">
+              This simulation extends the classic boids algorithm with predator-prey dynamics, genetic mutations, energy systems, and environmental features like day/night cycles, creating a rich ecosystem where evolution and survival play out in real-time.
+            </p>
+
+            <h3 className="text-lg font-semibold text-yellow-400 mb-2 mt-4">The Three Classic Rules</h3>
+            <p className="mb-2">Each boid follows three simple steering behaviors:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              <li><span className="text-cyan-400 font-medium">Separation:</span> Steer to avoid crowding nearby flockmates</li>
+              <li><span className="text-cyan-400 font-medium">Alignment:</span> Steer towards the average heading of nearby flockmates</li>
+              <li><span className="text-cyan-400 font-medium">Cohesion:</span> Steer toward the average position of nearby flockmates</li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-lg font-semibold text-yellow-400 mb-2">Emergent Complexity</h3>
+            <p className="mb-3">
+              What makes boids fascinating is that no individual boid knows about "the flock" as a whole. Each agent only perceives its local neighbors, yet beautiful, coordinated group behaviors emerge naturally. This mirrors how real birds, fish, and insects form swarms without central coordination.
+            </p>
+            <p className="mb-3">
+              This principle applies beyond nature: traffic flow, crowd dynamics, and even economic markets exhibit similar emergent properties where simple local interactions create complex global patterns.
+            </p>
+
+            <h3 className="text-lg font-semibold text-yellow-400 mb-2 mt-4">This Simulation's Features</h3>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              <li><span className="text-cyan-400 font-medium">27 Mutations:</span> Genetic traits that affect speed, size, behavior, and survival</li>
+              <li><span className="text-cyan-400 font-medium">Predator AI:</span> Hunting predators that force boids to evolve defensive traits</li>
+              <li><span className="text-cyan-400 font-medium">Day/Night Cycle:</span> Affects visibility, predator aggression, and boid behavior</li>
+              <li><span className="text-cyan-400 font-medium">Energy System:</span> Boids must manage energy through food, rest, and shelter</li>
+              <li><span className="text-cyan-400 font-medium">Reproduction:</span> Successful boids pass mutations to offspring</li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-6 pt-4 border-t border-gray-700">
+          <h3 className="text-lg font-semibold text-yellow-400 mb-2">Educational Applications</h3>
+          <p className="text-gray-300 text-sm leading-relaxed">
+            Boids simulations are widely used in computer science education to demonstrate concepts like agent-based modeling, spatial data structures (this simulation uses spatial hashing for efficient neighbor queries), vector mathematics, and the power of simple rules creating complex behaviors. The algorithm has also been used in film and video games to create realistic crowd and flock animations, from the wildebeest stampede in The Lion King to modern video game NPCs.
+          </p>
+        </div>
       </div>
 
       <div className="w-full max-w-5xl mt-4 flex justify-center">
